@@ -86,3 +86,35 @@ th, td {
 .status-available { color: #1a7f37; font-weight: 600; }
 .status-full { color: #b3261e; }
 .status-unknown { color: #888; }
+
+form select {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 0.5rem;
+  margin-top: 0.25rem;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  font-size: 1rem;
+  background: #fff;
+}
+
+.hint {
+  font-size: 0.8rem;
+  color: #666;
+  margin: 0 0 0.75rem;
+}
+
+.error {
+  color: #b3261e;
+  font-size: 0.85rem;
+  margin-left: 0.75rem;
+}
+
+td.detail {
+  font-size: 0.8rem;
+  line-height: 1.45;
+  max-width: 22rem;
+}
+
+td small { color: #666; }

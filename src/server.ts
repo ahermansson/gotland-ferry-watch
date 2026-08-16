@@ -3,7 +3,10 @@ import express from "express";
 import path from "node:path";
 import { createWatch, deleteWatch, listWatches, setActive } from "./db.js";
 import { runSingleCheck } from "./scheduler.js";
-import type { NewWatchInput } from "./types.js";
+import { ROUTES, VEHICLE_LABELS, type NewWatchInput, type Route, type VehicleType } from "./types.js";
+
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+const TIME_RE = /^\d{2}:\d{2}$/;
 
 export function createServer() {
   const app = express();
@@ -11,23 +14,42 @@ export function createServer() {
   app.use(express.json());
   app.use(express.static(path.resolve("public")));
 
+  app.get("/api/options", (_req, res) => {
+    res.json({ routes: ROUTES, vehicles: VEHICLE_LABELS });
+  });
+
   app.get("/api/watches", (_req, res) => {
     res.json(listWatches());
   });
 
   app.post("/api/watches", (req, res) => {
     const body = req.body as Partial<NewWatchInput>;
-    if (!body.label || !body.origin || !body.destination || !body.date) {
-      res.status(400).json({ error: "label, origin, destination and date are required" });
+    const errors: string[] = [];
+
+    if (!body.label?.trim()) errors.push("label krävs");
+    if (!body.route || !ROUTES.includes(body.route as Route)) errors.push("okänd route");
+    if (!body.date || !DATE_RE.test(body.date)) errors.push("date måste vara YYYY-MM-DD");
+    if (!body.departureTime || !TIME_RE.test(body.departureTime))
+      errors.push("departureTime måste vara HH:MM");
+
+    const adults = body.adults === undefined ? 2 : Number(body.adults);
+    if (!Number.isInteger(adults) || adults < 1 || adults > 9) errors.push("adults måste vara 1–9");
+
+    const vehicle = (body.vehicle ?? "car-under-225") as VehicleType;
+    if (!(vehicle in VEHICLE_LABELS)) errors.push("okänt fordon");
+
+    if (errors.length) {
+      res.status(400).json({ error: errors.join(", ") });
       return;
     }
+
     const watch = createWatch({
-      label: body.label,
-      origin: body.origin,
-      destination: body.destination,
-      date: body.date,
-      time: body.time ?? null,
-      searchUrl: body.searchUrl ?? null,
+      label: body.label!.trim(),
+      route: body.route as Route,
+      date: body.date!,
+      departureTime: body.departureTime!,
+      adults,
+      vehicle,
     });
     res.status(201).json(watch);
   });

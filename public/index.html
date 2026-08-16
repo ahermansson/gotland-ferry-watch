@@ -8,34 +8,36 @@
 <body>
   <main>
     <h1>Gotland Ferry Watch</h1>
-    <p class="subtitle">Bevakar Destination Gotlands avgångar och pingar Discord när en plats blir ledig.</p>
+    <p class="subtitle">Bevakar en specifik avgång hos Destination Gotland och pingar Discord när en salong blir ledig.</p>
 
     <section class="card">
       <h2>Lägg till bevakning</h2>
       <form id="add-form">
         <label>Namn
-          <input name="label" placeholder="t.ex. Fredag hemresa" required />
+          <input name="label" placeholder="t.ex. Söndag hem" required />
         </label>
         <div class="row">
-          <label>Från
-            <input name="origin" placeholder="Nynäshamn" required />
+          <label>Resväg
+            <select name="route" id="route-select" required></select>
           </label>
-          <label>Till
-            <input name="destination" placeholder="Visby" required />
-          </label>
-        </div>
-        <div class="row">
           <label>Datum
             <input name="date" type="date" required />
           </label>
-          <label>Tid (valfritt)
-            <input name="time" type="time" />
+        </div>
+        <div class="row">
+          <label>Avgång (HH:MM)
+            <input name="departureTime" placeholder="07:15" pattern="\d{2}:\d{2}" required />
+          </label>
+          <label>Antal vuxna
+            <input name="adults" type="number" min="1" max="9" value="2" required />
+          </label>
+          <label>Fordon
+            <select name="vehicle" id="vehicle-select" required></select>
           </label>
         </div>
-        <label>Sökresultat-URL (rekommenderas)
-          <input name="searchUrl" placeholder="Klistra in URL:en från en manuell sökning på destinationgotland.se" />
-        </label>
+        <p class="hint">Avgångstiden måste matcha sajtens tabell exakt, t.ex. <code>07:15</code>.</p>
         <button type="submit">Lägg till</button>
+        <span id="form-error" class="error"></span>
       </form>
     </section>
 
@@ -45,9 +47,9 @@
         <thead>
           <tr>
             <th>Namn</th>
-            <th>Rutt</th>
-            <th>Datum / tid</th>
+            <th>Resa</th>
             <th>Status</th>
+            <th>Lediga biljetter</th>
             <th>Senast kollad</th>
             <th>Aktiv</th>
             <th></th>

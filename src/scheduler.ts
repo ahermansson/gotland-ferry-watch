@@ -1,8 +1,8 @@
 import cron from "node-cron";
 import { getWatch, listWatches, recordCheckResult } from "./db.js";
 import { sendDiscordNotification } from "./notifier.js";
-import { checkAvailability } from "./scraper.js";
-import type { CheckResult } from "./types.js";
+import { checkAvailability, summarizeOffer } from "./scraper.js";
+import { VEHICLE_LABELS, type CheckResult } from "./types.js";
 
 export async function runSingleCheck(watchId: string): Promise<CheckResult | undefined> {
   const watch = getWatch(watchId);
@@ -14,10 +14,13 @@ export async function runSingleCheck(watchId: string): Promise<CheckResult | und
   recordCheckResult(watch.id, result.status, result.detail, becameAvailable);
 
   if (becameAvailable) {
-    const when = watch.time ? `${watch.date} ${watch.time}` : watch.date;
-    await sendDiscordNotification(
-      `🚢 Ledig plats! **${watch.label}** — ${watch.origin} → ${watch.destination}, ${when}\n${result.detail}`
-    );
+    const vehicle = VEHICLE_LABELS[watch.vehicle];
+    const header =
+      `🚢 **Ledig plats!** ${watch.label}\n` +
+      `${watch.route.replace("-", " → ")}, ${watch.date} kl ${watch.departureTime} · ` +
+      `${watch.adults} vuxen/vuxna · ${vehicle}`;
+    const body = result.offer ? summarizeOffer(result.offer) : result.detail;
+    await sendDiscordNotification(`${header}\n${body}`);
   }
 
   return result;
@@ -47,9 +50,22 @@ async function runCycle(): Promise<void> {
   }
 }
 
+/**
+ * node-cron's `*​/N` only lines up with the hour when N divides 60, so we pick the nearest
+ * divisor instead of silently checking at uneven gaps.
+ */
+export function cronExpressionFor(intervalMinutes: number): string {
+  const divisors = [1, 2, 3, 4, 5, 6, 10, 12, 15, 20, 30, 60];
+  const wanted = Math.max(1, Math.round(intervalMinutes));
+  const chosen = divisors.reduce((best, d) =>
+    Math.abs(d - wanted) < Math.abs(best - wanted) ? d : best
+  );
+  return chosen === 60 ? "0 * * * *" : `*/${chosen} * * * *`;
+}
+
 export function startScheduler(): void {
   const intervalMinutes = Number(process.env.CHECK_INTERVAL_MINUTES ?? "10");
-  const cronExpression = `*/${Math.max(1, Math.round(intervalMinutes))} * * * *`;
+  const cronExpression = cronExpressionFor(intervalMinutes);
 
   console.log(`Scheduling checks every ${intervalMinutes} minute(s) (${cronExpression}).`);
   cron.schedule(cronExpression, () => {

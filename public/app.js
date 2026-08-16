@@ -1,21 +1,48 @@
 const tbody = document.querySelector("#watch-table tbody");
 const form = document.querySelector("#add-form");
+const formError = document.querySelector("#form-error");
+
+let vehicleLabels = {};
+
+async function loadOptions() {
+  const res = await fetch("/api/options");
+  const { routes, vehicles } = await res.json();
+  vehicleLabels = vehicles;
+
+  const routeSelect = document.querySelector("#route-select");
+  routeSelect.innerHTML = routes
+    .map((r) => `<option value="${r}">${escapeHtml(r.replace("-", " → "))}</option>`)
+    .join("");
+  routeSelect.value = "Visby-Nynäshamn";
+
+  document.querySelector("#vehicle-select").innerHTML = Object.entries(vehicles)
+    .map(([k, v]) => `<option value="${k}">${escapeHtml(v)}</option>`)
+    .join("");
+  document.querySelector("#vehicle-select").value = "car-under-225";
+}
 
 async function loadWatches() {
-  const res = await fetch("/api/watches");
-  const watches = await res.json();
+  let watches;
+  try {
+    const res = await fetch("/api/watches");
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    watches = await res.json();
+  } catch (err) {
+    formError.textContent = `Kunde inte hämta bevakningar: ${err.message}`;
+    return;
+  }
+
   tbody.innerHTML = "";
   for (const w of watches) {
     const tr = document.createElement("tr");
-
-    const when = w.time ? `${w.date} ${w.time}` : w.date;
     const lastChecked = w.lastCheckedAt ? new Date(w.lastCheckedAt).toLocaleString("sv-SE") : "–";
+    const trip = `${w.route.replace("-", " → ")}<br /><small>${escapeHtml(w.date)} kl ${escapeHtml(w.departureTime)} · ${w.adults} vuxna · ${escapeHtml(vehicleLabels[w.vehicle] ?? w.vehicle)}</small>`;
 
     tr.innerHTML = `
       <td>${escapeHtml(w.label)}</td>
-      <td>${escapeHtml(w.origin)} → ${escapeHtml(w.destination)}</td>
-      <td>${escapeHtml(when)}</td>
+      <td>${trip}</td>
       <td class="status-${w.lastStatus}">${statusLabel(w.lastStatus)}</td>
+      <td class="detail">${escapeHtml(w.lastDetail ?? "–").replace(/\n/g, "<br />")}</td>
       <td>${escapeHtml(lastChecked)}</td>
       <td><input type="checkbox" data-action="toggle" data-id="${w.id}" ${w.active ? "checked" : ""} /></td>
       <td>
@@ -45,14 +72,27 @@ function escapeHtml(str) {
 
 form.addEventListener("submit", async (e) => {
   e.preventDefault();
+  formError.textContent = "";
   const data = Object.fromEntries(new FormData(form).entries());
-  await fetch("/api/watches", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(data),
-  });
-  form.reset();
-  await loadWatches();
+  data.adults = Number(data.adults);
+
+  try {
+    const res = await fetch("/api/watches", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.error ?? `HTTP ${res.status}`);
+    }
+    form.reset();
+    document.querySelector("#route-select").value = "Visby-Nynäshamn";
+    document.querySelector("#vehicle-select").value = "car-under-225";
+    await loadWatches();
+  } catch (err) {
+    formError.textContent = err.message;
+  }
 });
 
 tbody.addEventListener("click", async (e) => {
@@ -67,8 +107,15 @@ tbody.addEventListener("click", async (e) => {
   } else if (action === "check") {
     btn.disabled = true;
     btn.textContent = "Kollar...";
-    await fetch(`/api/watches/${id}/check`, { method: "POST" });
-    await loadWatches();
+    try {
+      const res = await fetch(`/api/watches/${id}/check`, { method: "POST" });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        formError.textContent = `Kontrollen misslyckades: ${body.error ?? res.status}`;
+      }
+    } finally {
+      await loadWatches();
+    }
   }
 });
 
@@ -82,5 +129,5 @@ tbody.addEventListener("change", async (e) => {
   });
 });
 
-loadWatches();
+loadOptions().then(loadWatches);
 setInterval(loadWatches, 15_000);

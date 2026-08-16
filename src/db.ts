@@ -2,7 +2,7 @@ import Database from "better-sqlite3";
 import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import type { NewWatchInput, Watch, WatchStatus } from "./types.js";
+import type { NewWatchInput, Route, VehicleType, Watch, WatchStatus } from "./types.js";
 
 const DATA_DIR = path.resolve("data");
 fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -10,15 +10,15 @@ fs.mkdirSync(DATA_DIR, { recursive: true });
 const db = new Database(path.join(DATA_DIR, "watches.sqlite"));
 db.pragma("journal_mode = WAL");
 
-db.exec(`
+const SCHEMA = `
   CREATE TABLE IF NOT EXISTS watches (
     id TEXT PRIMARY KEY,
     label TEXT NOT NULL,
-    origin TEXT NOT NULL,
-    destination TEXT NOT NULL,
+    route TEXT NOT NULL,
     date TEXT NOT NULL,
-    time TEXT,
-    search_url TEXT,
+    departure_time TEXT NOT NULL,
+    adults INTEGER NOT NULL DEFAULT 2,
+    vehicle TEXT NOT NULL DEFAULT 'car-under-225',
     active INTEGER NOT NULL DEFAULT 1,
     last_status TEXT NOT NULL DEFAULT 'unknown',
     last_checked_at TEXT,
@@ -26,16 +26,27 @@ db.exec(`
     notified_at TEXT,
     created_at TEXT NOT NULL
   )
-`);
+`;
+
+db.exec(SCHEMA);
+
+// The pre-V1 schema stored a pasted search URL instead of a departure. It cannot be
+// migrated into the new model, so replace it — see README.
+const columns = db.prepare("PRAGMA table_info(watches)").all() as { name: string }[];
+if (!columns.some((c) => c.name === "departure_time")) {
+  console.warn("Replacing the pre-V1 watches table (its search-URL model is no longer supported).");
+  db.exec("DROP TABLE watches");
+  db.exec(SCHEMA);
+}
 
 interface WatchRow {
   id: string;
   label: string;
-  origin: string;
-  destination: string;
+  route: string;
   date: string;
-  time: string | null;
-  search_url: string | null;
+  departure_time: string;
+  adults: number;
+  vehicle: string;
   active: number;
   last_status: string;
   last_checked_at: string | null;
@@ -48,11 +59,11 @@ function rowToWatch(row: WatchRow): Watch {
   return {
     id: row.id,
     label: row.label,
-    origin: row.origin,
-    destination: row.destination,
+    route: row.route as Route,
     date: row.date,
-    time: row.time,
-    searchUrl: row.search_url,
+    departureTime: row.departure_time,
+    adults: row.adults,
+    vehicle: row.vehicle as VehicleType,
     active: row.active === 1,
     lastStatus: row.last_status as WatchStatus,
     lastCheckedAt: row.last_checked_at,
@@ -76,11 +87,11 @@ export function createWatch(input: NewWatchInput): Watch {
   const watch: Watch = {
     id: randomUUID(),
     label: input.label,
-    origin: input.origin,
-    destination: input.destination,
+    route: input.route,
     date: input.date,
-    time: input.time ?? null,
-    searchUrl: input.searchUrl ?? null,
+    departureTime: input.departureTime,
+    adults: input.adults ?? 2,
+    vehicle: input.vehicle ?? "car-under-225",
     active: true,
     lastStatus: "unknown",
     lastCheckedAt: null,
@@ -91,12 +102,9 @@ export function createWatch(input: NewWatchInput): Watch {
 
   db.prepare(
     `INSERT INTO watches
-      (id, label, origin, destination, date, time, search_url, active, last_status, last_checked_at, last_detail, notified_at, created_at)
-     VALUES (@id, @label, @origin, @destination, @date, @time, @searchUrl, @active, @lastStatus, @lastCheckedAt, @lastDetail, @notifiedAt, @createdAt)`
-  ).run({
-    ...watch,
-    active: watch.active ? 1 : 0,
-  });
+      (id, label, route, date, departure_time, adults, vehicle, active, last_status, last_checked_at, last_detail, notified_at, created_at)
+     VALUES (@id, @label, @route, @date, @departureTime, @adults, @vehicle, @active, @lastStatus, @lastCheckedAt, @lastDetail, @notifiedAt, @createdAt)`
+  ).run({ ...watch, active: watch.active ? 1 : 0 });
 
   return watch;
 }
