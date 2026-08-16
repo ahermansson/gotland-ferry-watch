@@ -29,10 +29,21 @@
             <input name="departureTime" placeholder="07:15" pattern="\d{2}:\d{2}" required />
           </label>
           <label>Antal vuxna
-            <input name="adults" type="number" min="1" max="9" value="2" required />
+            <div class="stepper">
+              <button type="button" class="step" data-target="adults" data-delta="-1" aria-label="Minska antal">−</button>
+              <input name="adults" type="number" min="1" max="9" value="2" inputmode="numeric" required />
+              <button type="button" class="step" data-target="adults" data-delta="1" aria-label="Öka antal">+</button>
+            </div>
           </label>
           <label>Fordon
-            <select name="vehicle" id="vehicle-select" required></select>
+            <div class="stepper">
+              <button type="button" class="step" data-target="vehicleCount" data-delta="-1" aria-label="Minska antal">−</button>
+              <input name="vehicleCount" type="number" min="0" max="1" value="1" inputmode="numeric" required />
+              <button type="button" class="step" data-target="vehicleCount" data-delta="1" aria-label="Öka antal">+</button>
+            </div>
+          </label>
+          <label>Fordonstyp
+            <select name="vehicleType" id="vehicle-select" required></select>
           </label>
         </div>
         <p class="hint">Avgångstiden måste matcha sajtens tabell exakt, t.ex. <code>07:15</code>.</p>

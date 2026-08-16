@@ -1,5 +1,5 @@
 :root {
-  color-scheme: light dark;
+  color-scheme: light;
   font-family: system-ui, sans-serif;
 }
 
@@ -38,7 +38,8 @@ form label {
   font-size: 0.9rem;
 }
 
-form input {
+form input,
+form select {
   display: block;
   width: 100%;
   box-sizing: border-box;
@@ -47,15 +48,19 @@ form input {
   border: 1px solid #ccc;
   border-radius: 6px;
   font-size: 1rem;
+  background: #fff;
+  color: #000;
 }
 
 .row {
   display: flex;
   gap: 1rem;
+  flex-wrap: wrap;
 }
 
 .row label {
-  flex: 1;
+  flex: 1 1 12rem;
+  min-width: 12rem;
 }
 
 button {
@@ -87,18 +92,6 @@ th, td {
 .status-full { color: #b3261e; }
 .status-unknown { color: #888; }
 
-form select {
-  display: block;
-  width: 100%;
-  box-sizing: border-box;
-  padding: 0.5rem;
-  margin-top: 0.25rem;
-  border: 1px solid #ccc;
-  border-radius: 6px;
-  font-size: 1rem;
-  background: #fff;
-}
-
 .hint {
   font-size: 0.8rem;
   color: #666;
@@ -118,3 +111,40 @@ td.detail {
 }
 
 td small { color: #666; }
+
+.stepper {
+  display: flex;
+  align-items: stretch;
+  gap: 0.4rem;
+  margin-top: 0.25rem;
+}
+
+.stepper input {
+  margin-top: 0;
+  text-align: center;
+  /* The +/- buttons replace the browser's own spinners. */
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+
+.stepper input::-webkit-outer-spin-button,
+.stepper input::-webkit-inner-spin-button {
+  appearance: none;
+  margin: 0;
+}
+
+.stepper .step {
+  flex: 0 0 2.4rem;
+  background: #fff;
+  color: #000;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  font-size: 1.1rem;
+  line-height: 1;
+  padding: 0;
+  cursor: pointer;
+}
+
+.stepper .step:hover {
+  background: #f0f0f0;
+}
