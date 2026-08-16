@@ -11,7 +11,7 @@ the notification.
 ## How it works
 
 1. You add a "watch" (route, date, departure time, passengers, vehicle) via the local web UI.
-2. Every `CHECK_INTERVAL_MINUTES` (default 10), the app drives the real booking flow on
+2. Every 10–15 minutes (base interval plus jitter), the app drives the real booking flow on
    destinationgotland.se in a headless browser: dismiss the cookie banner, fill in the
    search widget, search, then expand each fare class on your departure and read the
    lounge rows.
@@ -56,8 +56,8 @@ cp .env.example .env
 Edit `.env`:
 - `DISCORD_WEBHOOK_URL` — create one in Discord: **Server Settings → Integrations →
   Webhooks → New Webhook → Copy Webhook URL**. Treat it like a password.
-- `CHECK_INTERVAL_MINUTES` — how often to check. Rounded to the nearest divisor of 60
-  (1, 2, 3, 4, 5, 6, 10, 12, 15, 20, 30, 60) so checks line up with the hour.
+- `CHECK_INTERVAL_MINUTES` / `CHECK_JITTER_MINUTES` — base interval plus random jitter,
+  default 10 + 0–5, i.e. an actual interval of 10–15 minutes. See "A note on scraping".
 - `DEBUG_SCRAPER=1` — save a screenshot + text dump to `debug/` on every check. Failures
   and "departure not found" always dump, regardless of this setting.
 
@@ -95,6 +95,12 @@ It's built for personal, low-frequency use (a handful of specific departures eve
 minutes) — not for bulk scraping. Please:
 
 - Keep `CHECK_INTERVAL_MINUTES` reasonable. One check takes ~30–40 seconds.
+- Checks are spaced by the base interval plus random jitter, so they don't land on the
+  same clock tick every hour, and they run sequentially — never in parallel.
+- If every check in a cycle fails, the interval doubles (capped at 8×, so ~80–120 min)
+  until one succeeds. If the site is pushing back, knocking at the same rate helps nobody.
+- The single biggest load reduction is that watches stop on their own: once a
+  notification is delivered, and once the departure time has passed.
 - Check destinationgotland.se's terms of use if you plan to rely on this long-term.
 - Expect it to break if the site's widget changes — it depends on element ids like
   `#booking-widget-transport-button-1` and the `Slutsålt` wording.
@@ -107,7 +113,7 @@ The scraper never logs in, never proceeds past lounge selection, and never books
 src/
   index.ts       entry point — starts the web server + scheduler
   server.ts      Express app + REST API for the UI
-  scheduler.ts   cron loop that checks active watches
+  scheduler.ts   self-scheduling check loop, with jitter and failure backoff
   scraper.ts     Playwright booking-flow automation and availability parsing
   notifier.ts    Discord webhook sender
   db.ts          SQLite storage for watches

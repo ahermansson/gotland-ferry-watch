@@ -1,4 +1,3 @@
-import cron from "node-cron";
 import { getWatch, listWatches, recordCheckResult, setActive } from "./db.js";
 import { sendDiscordNotification } from "./notifier.js";
 import { checkAvailability, summarizeOffer } from "./scraper.js";
@@ -53,12 +52,19 @@ export function hasDeparted(watch: Pick<Watch, "date" | "departureTime">, now = 
   return nowLocal > `${watch.date} ${watch.departureTime}`;
 }
 
+export interface CycleOutcome {
+  checked: number;
+  deactivated: number;
+  /** True when every check in the cycle failed, which we read as the site pushing back. */
+  failed: boolean;
+}
+
 let running = false;
 
-async function runCycle(): Promise<void> {
+export async function runCycle(): Promise<CycleOutcome> {
   if (running) {
     console.log("Previous check cycle still running, skipping this tick.");
-    return;
+    return { checked: 0, deactivated: 0, failed: false };
   }
   running = true;
   try {
@@ -72,41 +78,83 @@ async function runCycle(): Promise<void> {
 
     const watches = active.filter((w) => !hasDeparted(w));
     console.log(`Checking ${watches.length} active watch(es)...`);
+
+    let failures = 0;
     for (const watch of watches) {
       try {
         const result = await runSingleCheck(watch.id);
         console.log(`  ${watch.label}: ${result?.status ?? "error"}`);
+        if (!result || result.status === "unknown") failures++;
       } catch (error) {
         console.error(`  ${watch.label}: check threw`, error);
+        failures++;
       }
     }
+
+    return {
+      checked: watches.length,
+      deactivated: departed.length,
+      failed: watches.length > 0 && failures === watches.length,
+    };
   } finally {
     running = false;
   }
 }
 
 /**
- * node-cron's `*​/N` only lines up with the hour when N divides 60, so we pick the nearest
- * divisor instead of silently checking at uneven gaps.
+ * Delay before the next cycle: a base interval plus random jitter, so checks don't land on
+ * the same clock tick every hour. Repeated all-failed cycles back off exponentially —
+ * if the site is pushing back, knocking at the same rate helps nobody.
  */
-export function cronExpressionFor(intervalMinutes: number): string {
-  const divisors = [1, 2, 3, 4, 5, 6, 10, 12, 15, 20, 30, 60];
-  const wanted = Math.max(1, Math.round(intervalMinutes));
-  const chosen = divisors.reduce((best, d) =>
-    Math.abs(d - wanted) < Math.abs(best - wanted) ? d : best
-  );
-  return chosen === 60 ? "0 * * * *" : `*/${chosen} * * * *`;
+export function nextDelayMs(
+  baseMinutes: number,
+  jitterMinutes: number,
+  consecutiveFailures: number,
+  random: () => number = Math.random
+): number {
+  const backoff = Math.min(2 ** consecutiveFailures, MAX_BACKOFF_FACTOR);
+  const minutes = (baseMinutes + random() * jitterMinutes) * backoff;
+  return Math.round(minutes * 60_000);
 }
 
+const MAX_BACKOFF_FACTOR = 8;
+
+let timer: NodeJS.Timeout | undefined;
+
 export function startScheduler(): void {
-  const intervalMinutes = Number(process.env.CHECK_INTERVAL_MINUTES ?? "10");
-  const cronExpression = cronExpressionFor(intervalMinutes);
+  const baseMinutes = Number(process.env.CHECK_INTERVAL_MINUTES ?? "10");
+  const jitterMinutes = Number(process.env.CHECK_JITTER_MINUTES ?? "5");
+  let consecutiveFailures = 0;
 
-  console.log(`Scheduling checks every ${intervalMinutes} minute(s) (${cronExpression}).`);
-  cron.schedule(cronExpression, () => {
-    void runCycle();
-  });
+  console.log(
+    `Scheduling checks every ${baseMinutes}–${baseMinutes + jitterMinutes} minute(s), with backoff on repeated failures.`
+  );
 
-  // Also run once at startup so you don't have to wait for the first tick.
-  void runCycle();
+  const scheduleNext = () => {
+    const delay = nextDelayMs(baseMinutes, jitterMinutes, consecutiveFailures);
+    const when = new Date(Date.now() + delay).toLocaleTimeString("sv-SE");
+    const note = consecutiveFailures > 0 ? ` (backoff after ${consecutiveFailures} failed cycle(s))` : "";
+    console.log(`Next check at ${when}${note}.`);
+    timer = setTimeout(tick, delay);
+    timer.unref?.();
+  };
+
+  const tick = async () => {
+    try {
+      const outcome = await runCycle();
+      consecutiveFailures = outcome.failed ? consecutiveFailures + 1 : 0;
+    } catch (error) {
+      console.error("Check cycle threw:", error);
+      consecutiveFailures++;
+    }
+    scheduleNext();
+  };
+
+  // Run once at startup so you don't have to wait for the first interval.
+  void tick();
+}
+
+export function stopScheduler(): void {
+  if (timer) clearTimeout(timer);
+  timer = undefined;
 }
