@@ -347,7 +347,9 @@ export async function checkAvailability(watch: Watch): Promise<CheckResult> {
       status,
       detail: bookable
         ? summarizeOffer(offer)
-        : `Avgång ${watch.departureTime} är fullbokad i alla biljettklasser.`,
+        : fares.every((f) => f.soldOut)
+          ? `Avgång ${watch.departureTime} är slutsåld — ingen biljettklass går att välja.`
+          : `Avgång ${watch.departureTime}: biljettklasser finns kvar, men alla salonger är slutsålda.\n${summarizeOffer(offer)}`,
       offer,
       ...extra,
     };
