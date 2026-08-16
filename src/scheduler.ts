@@ -2,7 +2,7 @@ import cron from "node-cron";
 import { getWatch, listWatches, recordCheckResult, setActive } from "./db.js";
 import { sendDiscordNotification } from "./notifier.js";
 import { checkAvailability, summarizeOffer } from "./scraper.js";
-import { VEHICLE_LABELS, type CheckResult } from "./types.js";
+import { VEHICLE_LABELS, type CheckResult, type Watch } from "./types.js";
 
 export async function runSingleCheck(watchId: string): Promise<CheckResult | undefined> {
   const watch = getWatch(watchId);
@@ -35,6 +35,24 @@ export async function runSingleCheck(watchId: string): Promise<CheckResult | und
   return result;
 }
 
+/**
+ * True once the watched departure's time has passed in Stockholm, where the timetable is
+ * stated. Both sides are formatted as "YYYY-MM-DD HH:MM", so a string compare is enough
+ * and no UTC-offset arithmetic is needed.
+ */
+export function hasDeparted(watch: Pick<Watch, "date" | "departureTime">, now = new Date()): boolean {
+  const nowLocal = now.toLocaleString("sv-SE", {
+    timeZone: "Europe/Stockholm",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+  return nowLocal > `${watch.date} ${watch.departureTime}`;
+}
+
 let running = false;
 
 async function runCycle(): Promise<void> {
@@ -44,7 +62,15 @@ async function runCycle(): Promise<void> {
   }
   running = true;
   try {
-    const watches = listWatches().filter((w) => w.active);
+    const active = listWatches().filter((w) => w.active);
+
+    const departed = active.filter((w) => hasDeparted(w));
+    for (const watch of departed) {
+      setActive(watch.id, false);
+      console.log(`  ${watch.label}: departure ${watch.date} ${watch.departureTime} has passed, deactivated.`);
+    }
+
+    const watches = active.filter((w) => !hasDeparted(w));
     console.log(`Checking ${watches.length} active watch(es)...`);
     for (const watch of watches) {
       try {
