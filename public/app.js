@@ -15,20 +15,11 @@ async function loadOptions() {
     .join("");
   routeSelect.value = "Visby-Nynäshamn";
 
-  // "none" is expressed by the count stepper instead of being an option here.
   const vehicleSelect = document.querySelector("#vehicle-select");
   vehicleSelect.innerHTML = Object.entries(vehicles)
-    .filter(([k]) => k !== "none")
     .map(([k, v]) => `<option value="${k}">${escapeHtml(v)}</option>`)
     .join("");
   vehicleSelect.value = "car-under-225";
-  syncVehicleFields();
-}
-
-/** The type only means anything when a vehicle is actually coming along. */
-function syncVehicleFields() {
-  const count = Number(form.querySelector('[name="vehicleCount"]').value || 0);
-  document.querySelector("#vehicle-select").disabled = count === 0;
 }
 
 async function loadWatches() {
@@ -90,7 +81,6 @@ form.addEventListener("click", (e) => {
   const max = Number(input.max || 99);
   const next = Number(input.value || min) + Number(btn.dataset.delta);
   input.value = String(Math.min(max, Math.max(min, next)));
-  if (btn.dataset.target === "vehicleCount") syncVehicleFields();
 });
 
 form.addEventListener("submit", async (e) => {
@@ -98,10 +88,6 @@ form.addEventListener("submit", async (e) => {
   formError.textContent = "";
   const data = Object.fromEntries(new FormData(form).entries());
   data.adults = Number(data.adults);
-  // The API takes a single vehicle type; no vehicle is "none".
-  data.vehicle = Number(data.vehicleCount) > 0 ? data.vehicleType : "none";
-  delete data.vehicleCount;
-  delete data.vehicleType;
 
   try {
     const res = await fetch("/api/watches", {
@@ -116,7 +102,6 @@ form.addEventListener("submit", async (e) => {
     form.reset();
     document.querySelector("#route-select").value = "Visby-Nynäshamn";
     document.querySelector("#vehicle-select").value = "car-under-225";
-    syncVehicleFields();
     await loadWatches();
   } catch (err) {
     formError.textContent = err.message;
