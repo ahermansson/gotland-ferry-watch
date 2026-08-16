@@ -1,5 +1,5 @@
 import cron from "node-cron";
-import { getWatch, listWatches, recordCheckResult } from "./db.js";
+import { getWatch, listWatches, recordCheckResult, setActive } from "./db.js";
 import { sendDiscordNotification } from "./notifier.js";
 import { checkAvailability, summarizeOffer } from "./scraper.js";
 import { VEHICLE_LABELS, type CheckResult } from "./types.js";
@@ -20,7 +20,16 @@ export async function runSingleCheck(watchId: string): Promise<CheckResult | und
       `${watch.route.replace("-", " → ")}, ${watch.date} kl ${watch.departureTime} · ` +
       `${watch.adults} vuxen/vuxna · ${vehicle}`;
     const body = result.offer ? summarizeOffer(result.offer) : result.detail;
-    await sendDiscordNotification(`${header}\n${body}`);
+    const delivered = await sendDiscordNotification(`${header}\n${body}`);
+
+    // The notification is the point of the watch, so stop once it lands. If it did not,
+    // keep watching — otherwise a failed webhook would silently end the search.
+    if (delivered) {
+      setActive(watch.id, false);
+      console.log(`  ${watch.label}: notified, watch deactivated.`);
+    } else {
+      console.warn(`  ${watch.label}: notification failed, keeping the watch active.`);
+    }
   }
 
   return result;
