@@ -2,7 +2,17 @@ import Database from "better-sqlite3";
 import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import { SETTINGS_LIMITS, type NewWatchInput, type Route, type Settings, type VehicleType, type Watch, type WatchStatus } from "./types.js";
+import {
+  SETTINGS_LIMITS,
+  type NewWatchInput,
+  type NumericSetting,
+  type Route,
+  type Settings,
+  type TimeSetting,
+  type VehicleType,
+  type Watch,
+  type WatchStatus,
+} from "./types.js";
 
 const DATA_DIR = path.resolve("data");
 fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -129,21 +139,35 @@ function clamp(value: number, { min, max }: { min: number; max: number }): numbe
 }
 
 /**
- * A stored number, or the `.env` value, or the built-in default. The env vars stay the
+ * A stored value, or the `.env` value, or the built-in default. The env vars stay the
  * defaults for a fresh install; once the UI writes a setting, the stored value wins.
  */
-function readNumber(key: keyof Settings, envName: string, fallback: number): number {
+function readRaw(key: string, envName: string): string | undefined {
   const row = db.prepare("SELECT value FROM settings WHERE key = ?").get(key) as
     | { value: string }
     | undefined;
-  const raw = Number(row?.value ?? process.env[envName] ?? fallback);
+  return row?.value ?? process.env[envName];
+}
+
+function readNumber(key: NumericSetting, envName: string, fallback: number): number {
+  const raw = Number(readRaw(key, envName) ?? fallback);
   return clamp(Number.isFinite(raw) ? raw : fallback, SETTINGS_LIMITS[key]);
+}
+
+const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
+
+function readTime(key: TimeSetting, envName: string, fallback: string): string {
+  const raw = readRaw(key, envName) ?? fallback;
+  return TIME_RE.test(raw) ? raw : fallback;
 }
 
 export function getSettings(): Settings {
   return {
     intervalMinutes: readNumber("intervalMinutes", "CHECK_INTERVAL_MINUTES", 10),
     jitterMinutes: readNumber("jitterMinutes", "CHECK_JITTER_MINUTES", 5),
+    // Nobody releases tickets at 03:00, and nobody books a ferry then either.
+    activeFrom: readTime("activeFrom", "CHECK_WINDOW_FROM", "06:00"),
+    activeTo: readTime("activeTo", "CHECK_WINDOW_TO", "00:00"),
   };
 }
 
@@ -151,9 +175,13 @@ export function saveSettings(settings: Settings): Settings {
   const write = db.prepare(
     "INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value"
   );
-  for (const [key, value] of Object.entries(settings)) {
-    write.run(key, String(clamp(value, SETTINGS_LIMITS[key as keyof Settings])));
-  }
+  const rows: [string, string][] = [
+    ["intervalMinutes", String(clamp(settings.intervalMinutes, SETTINGS_LIMITS.intervalMinutes))],
+    ["jitterMinutes", String(clamp(settings.jitterMinutes, SETTINGS_LIMITS.jitterMinutes))],
+    ["activeFrom", settings.activeFrom],
+    ["activeTo", settings.activeTo],
+  ];
+  for (const [key, value] of rows) write.run(key, value);
   return getSettings();
 }
 

@@ -8,6 +8,7 @@ import {
   SETTINGS_LIMITS,
   VEHICLE_LABELS,
   type NewWatchInput,
+  type NumericSetting,
   type Route,
   type Settings,
   type VehicleType,
@@ -15,6 +16,8 @@ import {
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const TIME_RE = /^\d{2}:\d{2}$/;
+/** Stricter than TIME_RE: a settings window has to be a real clock time. */
+const CLOCK_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
 
 export function createServer() {
   const app = express();
@@ -35,7 +38,7 @@ export function createServer() {
     const current = getSettings();
     const errors: string[] = [];
 
-    const parse = (key: keyof Settings): number => {
+    const parse = (key: NumericSetting): number => {
       if (body[key] === undefined) return current[key];
       const value = Number(body[key]);
       const { min, max } = SETTINGS_LIMITS[key];
@@ -45,7 +48,19 @@ export function createServer() {
       return value;
     };
 
-    const settings = { intervalMinutes: parse("intervalMinutes"), jitterMinutes: parse("jitterMinutes") };
+    const parseTime = (key: "activeFrom" | "activeTo"): string => {
+      if (body[key] === undefined) return current[key];
+      const value = String(body[key]);
+      if (!CLOCK_RE.test(value)) errors.push(`${key} måste vara HH:MM`);
+      return value;
+    };
+
+    const settings = {
+      intervalMinutes: parse("intervalMinutes"),
+      jitterMinutes: parse("jitterMinutes"),
+      activeFrom: parseTime("activeFrom"),
+      activeTo: parseTime("activeTo"),
+    };
     if (errors.length) {
       res.status(400).json({ error: errors.join(", ") });
       return;

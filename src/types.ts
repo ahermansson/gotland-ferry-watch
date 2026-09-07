@@ -90,18 +90,29 @@ export interface NewWatchInput {
   vehicle?: VehicleType;
 }
 
-/** How often the scheduler runs a check cycle. Editable from the web UI. */
+/** How often, and when, the scheduler runs a check cycle. Editable from the web UI. */
 export interface Settings {
   /** Base minutes between cycles. */
   intervalMinutes: number;
   /** Random minutes added on top, so checks don't land on the same clock tick every hour. */
   jitterMinutes: number;
+  /**
+   * Daily window the checks run in, HH:MM in Europe/Stockholm — the timezone the
+   * timetable is stated in. `activeTo` may be earlier than `activeFrom`, which reads as a
+   * window across midnight; equal values mean no window at all, i.e. around the clock.
+   */
+  activeFrom: string;
+  activeTo: string;
 }
 
 export const SETTINGS_LIMITS = {
   intervalMinutes: { min: 1, max: 240 },
   jitterMinutes: { min: 0, max: 60 },
 } as const;
+
+export type NumericSetting = keyof typeof SETTINGS_LIMITS;
+export const TIME_SETTINGS = ["activeFrom", "activeTo"] as const;
+export type TimeSetting = (typeof TIME_SETTINGS)[number];
 
 export interface CheckResult {
   status: WatchStatus;

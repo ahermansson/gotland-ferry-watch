@@ -149,18 +149,26 @@ function renderSettings(settings, { fillInputs }) {
   if (fillInputs) {
     settingsForm.intervalMinutes.value = settings.intervalMinutes;
     settingsForm.jitterMinutes.value = settings.jitterMinutes;
+    settingsForm.activeFrom.value = settings.activeFrom;
+    settingsForm.activeTo.value = settings.activeTo;
   }
-  const { intervalMinutes: base, jitterMinutes: jitter } = settings;
+  const { intervalMinutes: base, jitterMinutes: jitter, activeFrom, activeTo } = settings;
   const span = jitter > 0 ? `${base}–${base + jitter}` : String(base);
+  const window =
+    activeFrom === activeTo ? "dygnet runt" : `mellan ${activeFrom} och ${activeTo}`;
+
   let next = "Väntar på schemaläggaren.";
   if (settings.checking) next = "En koll pågår just nu.";
+  else if (settings.paused && settings.nextCheckAt)
+    next = `Pausad – återupptas kl ${new Date(settings.nextCheckAt).toLocaleTimeString("sv-SE")}.`;
   else if (settings.nextCheckAt)
     next = `Nästa koll kl ${new Date(settings.nextCheckAt).toLocaleTimeString("sv-SE")}.`;
+
   const backoff =
     settings.consecutiveFailures > 0
       ? ` Väntetiden är uppdubblad efter ${settings.consecutiveFailures} misslyckad(e) cykel/cykler.`
       : "";
-  settingsStatus.textContent = `Kollar med ${span} minuters mellanrum. ${next}${backoff}`;
+  settingsStatus.textContent = `Kollar med ${span} minuters mellanrum ${window}. ${next}${backoff}`;
 }
 
 async function loadSettings({ fillInputs }) {
@@ -183,6 +191,8 @@ settingsForm.addEventListener("submit", async (e) => {
       body: JSON.stringify({
         intervalMinutes: Number(settingsForm.intervalMinutes.value),
         jitterMinutes: Number(settingsForm.jitterMinutes.value),
+        activeFrom: settingsForm.activeFrom.value,
+        activeTo: settingsForm.activeTo.value,
       }),
     });
     const body = await res.json().catch(() => ({}));

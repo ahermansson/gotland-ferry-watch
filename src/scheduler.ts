@@ -119,23 +119,87 @@ export function nextDelayMs(
 
 const MAX_BACKOFF_FACTOR = 8;
 
+/** Minutes since midnight in Stockholm, where the timetable — and the user — lives. */
+function stockholmMinutes(now: Date): number {
+  const [hours, minutes] = now
+    .toLocaleTimeString("sv-SE", {
+      timeZone: "Europe/Stockholm",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    })
+    .split(":")
+    .map(Number);
+  return hours * 60 + minutes;
+}
+
+function toMinutes(hhmm: string): number {
+  const [hours, minutes] = hhmm.split(":").map(Number);
+  return hours * 60 + minutes;
+}
+
+/**
+ * Whether checks should run right now. `to` earlier than `from` reads as a window across
+ * midnight (22:00–02:00), and equal values mean no window at all — check around the clock.
+ */
+export function isWithinWindow(from: string, to: string, now = new Date()): boolean {
+  const current = stockholmMinutes(now);
+  const start = toMinutes(from);
+  const end = toMinutes(to);
+  if (start === end) return true;
+  return start < end ? current >= start && current < end : current >= start || current < end;
+}
+
+/**
+ * Time until the window next opens. Minute granularity is plenty for something that then
+ * waits out a jittered interval anyway. A DST shift inside the wait moves the wake-up by
+ * an hour, twice a year, which nobody watching a ferry will notice.
+ */
+export function msUntilWindowOpens(from: string, now = new Date()): number {
+  const diff = toMinutes(from) - stockholmMinutes(now);
+  return (diff > 0 ? diff : diff + 24 * 60) * 60_000;
+}
+
 let timer: NodeJS.Timeout | undefined;
 let consecutiveFailures = 0;
 let nextCheckAt: string | null = null;
+let paused = false;
 
-/** The interval is read fresh here, so a change in the UI applies from the next cycle on. */
+/** Settings are read fresh here, so a change in the UI applies from the next cycle on. */
 function scheduleNext(): void {
-  const { intervalMinutes, jitterMinutes } = getSettings();
-  const delay = nextDelayMs(intervalMinutes, jitterMinutes, consecutiveFailures);
-  const at = new Date(Date.now() + delay);
+  const { intervalMinutes, jitterMinutes, activeFrom, activeTo } = getSettings();
+  const now = new Date();
+  let delay: number;
+  let note: string;
+
+  if (isWithinWindow(activeFrom, activeTo, now)) {
+    paused = false;
+    delay = nextDelayMs(intervalMinutes, jitterMinutes, consecutiveFailures);
+    note = consecutiveFailures > 0 ? ` (backoff after ${consecutiveFailures} failed cycle(s))` : "";
+  } else {
+    // Outside the window there is nothing to decide until it opens, so sleep until then
+    // rather than waking every interval to conclude the same thing. The jitter still
+    // applies, so the first check of the day doesn't land on the stroke of the hour.
+    paused = true;
+    delay = msUntilWindowOpens(activeFrom, now) + Math.round(Math.random() * jitterMinutes * 60_000);
+    note = ` (outside the ${activeFrom}–${activeTo} window)`;
+  }
+
+  const at = new Date(now.getTime() + delay);
   nextCheckAt = at.toISOString();
-  const note = consecutiveFailures > 0 ? ` (backoff after ${consecutiveFailures} failed cycle(s))` : "";
-  console.log(`Next check at ${at.toLocaleTimeString("sv-SE")}${note}.`);
+  console.log(`Next check at ${at.toLocaleString("sv-SE")}${note}.`);
   timer = setTimeout(tick, delay);
   timer.unref?.();
 }
 
 async function tick(): Promise<void> {
+  const { activeFrom, activeTo } = getSettings();
+  // The window may have closed under us — the wait is long, and it is editable mid-wait.
+  if (!isWithinWindow(activeFrom, activeTo)) {
+    scheduleNext();
+    return;
+  }
+
   try {
     const outcome = await runCycle();
     consecutiveFailures = outcome.failed ? consecutiveFailures + 1 : 0;
@@ -147,9 +211,10 @@ async function tick(): Promise<void> {
 }
 
 export function startScheduler(): void {
-  const { intervalMinutes, jitterMinutes } = getSettings();
+  const { intervalMinutes, jitterMinutes, activeFrom, activeTo } = getSettings();
+  const window = activeFrom === activeTo ? "around the clock" : `between ${activeFrom} and ${activeTo}`;
   console.log(
-    `Scheduling checks every ${intervalMinutes}–${intervalMinutes + jitterMinutes} minute(s), with backoff on repeated failures.`
+    `Scheduling checks every ${intervalMinutes}–${intervalMinutes + jitterMinutes} minute(s) ${window}, with backoff on repeated failures.`
   );
 
   // Run once at startup so you don't have to wait for the first interval.
@@ -170,15 +235,22 @@ export function rescheduleNow(): void {
 export function getSchedulerState(): {
   nextCheckAt: string | null;
   checking: boolean;
+  paused: boolean;
   consecutiveFailures: number;
 } {
   // While a cycle runs, `nextCheckAt` still holds the time it was started at, which would
   // read as a check that is overdue. Report the cycle instead.
-  return { nextCheckAt: running ? null : nextCheckAt, checking: running, consecutiveFailures };
+  return {
+    nextCheckAt: running ? null : nextCheckAt,
+    checking: running,
+    paused,
+    consecutiveFailures,
+  };
 }
 
 export function stopScheduler(): void {
   if (timer) clearTimeout(timer);
   timer = undefined;
   nextCheckAt = null;
+  paused = false;
 }

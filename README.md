@@ -60,6 +60,8 @@ Edit `.env`:
   default 10 + 0–5, i.e. an actual interval of 10–15 minutes. These are the starting
   values only: once you save the interval in the web UI, the stored value wins and
   editing `.env` no longer changes it. See "Check interval" and "A note on scraping".
+- `CHECK_WINDOW_FROM` / `CHECK_WINDOW_TO` — the daily window checks run in, default
+  06:00–00:00. Seeds the UI setting the same way.
 - `DEBUG_SCRAPER=1` — save a screenshot + text dump to `debug/` on every check. Failures
   and "departure not found" always dump, regardless of this setting.
 
@@ -87,6 +89,13 @@ The **Kontrollintervall** card at the bottom of the web UI sets how often the wa
 checked: a base interval in minutes plus a random jitter added on top, so `5` + `3` means
 a check every 5–8 minutes. It also shows when the next check is due.
 
+The same card sets the daily window the checks run in (default 06:00–00:00, Swedish time —
+nobody releases ferry tickets at 03:00, and nobody books one then either). Outside the
+window the scheduler sleeps until it opens rather than waking up to do nothing, so a night
+costs no requests at all. An end time before the start time is a window across midnight;
+setting both to the same time turns the window off and checks run around the clock.
+**Kolla nu** ignores the window — a manual check is always allowed.
+
 Saving applies immediately — the pending timer is re-armed, so shortening the interval
 doesn't wait out the old one. The value is stored in `data/watches.sqlite` and survives a
 restart; `CHECK_INTERVAL_MINUTES` / `CHECK_JITTER_MINUTES` in `.env` only seed it on a
@@ -112,6 +121,8 @@ minutes) — not for bulk scraping. Please:
   same clock tick every hour, and they run sequentially — never in parallel.
 - If every check in a cycle fails, the interval doubles (capped at 8×, so ~80–120 min)
   until one succeeds. If the site is pushing back, knocking at the same rate helps nobody.
+- Checks pause outside the daily window (06:00–00:00 by default), so the site sees
+  nothing from this tool overnight.
 - The single biggest load reduction is that watches stop on their own: once a
   notification is delivered, and once the departure time has passed.
 - Check destinationgotland.se's terms of use if you plan to rely on this long-term.
