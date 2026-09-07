@@ -57,7 +57,9 @@ Edit `.env`:
 - `DISCORD_WEBHOOK_URL` — create one in Discord: **Server Settings → Integrations →
   Webhooks → New Webhook → Copy Webhook URL**. Treat it like a password.
 - `CHECK_INTERVAL_MINUTES` / `CHECK_JITTER_MINUTES` — base interval plus random jitter,
-  default 10 + 0–5, i.e. an actual interval of 10–15 minutes. See "A note on scraping".
+  default 10 + 0–5, i.e. an actual interval of 10–15 minutes. These are the starting
+  values only: once you save the interval in the web UI, the stored value wins and
+  editing `.env` no longer changes it. See "Check interval" and "A note on scraping".
 - `DEBUG_SCRAPER=1` — save a screenshot + text dump to `debug/` on every check. Failures
   and "departure not found" always dump, regardless of this setting.
 
@@ -79,6 +81,17 @@ V1 supports one-way trips, adults (Vuxen 26+ år) only, and no vehicle / car und
 car over 2,25 m. Other passenger categories and vehicle types exist on the site but aren't
 exposed yet.
 
+## Check interval
+
+The **Kontrollintervall** card at the bottom of the web UI sets how often the watches are
+checked: a base interval in minutes plus a random jitter added on top, so `5` + `3` means
+a check every 5–8 minutes. It also shows when the next check is due.
+
+Saving applies immediately — the pending timer is re-armed, so shortening the interval
+doesn't wait out the old one. The value is stored in `data/watches.sqlite` and survives a
+restart; `CHECK_INTERVAL_MINUTES` / `CHECK_JITTER_MINUTES` in `.env` only seed it on a
+fresh install.
+
 ## Running it continuously
 
 This is a plain Node process (`npm start`), meant to be left running. Options:
@@ -94,7 +107,7 @@ This tool automates the booking flow on destinationgotland.se on a recurring sch
 It's built for personal, low-frequency use (a handful of specific departures every few
 minutes) — not for bulk scraping. Please:
 
-- Keep `CHECK_INTERVAL_MINUTES` reasonable. One check takes ~30–40 seconds.
+- Keep the check interval reasonable. One check takes ~30–40 seconds per watch.
 - Checks are spaced by the base interval plus random jitter, so they don't land on the
   same clock tick every hour, and they run sequentially — never in parallel.
 - If every check in a cycle fails, the interval doubles (capped at 8×, so ~80–120 min)

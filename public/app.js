@@ -1,6 +1,9 @@
 const tbody = document.querySelector("#watch-table tbody");
 const form = document.querySelector("#add-form");
 const formError = document.querySelector("#form-error");
+const settingsForm = document.querySelector("#settings-form");
+const settingsError = document.querySelector("#settings-error");
+const settingsStatus = document.querySelector("#settings-status");
 
 let vehicleLabels = {};
 
@@ -72,10 +75,10 @@ function escapeHtml(str) {
 }
 
 // +/- buttons drive the numeric fields, clamped to each input's own min/max.
-form.addEventListener("click", (e) => {
+document.addEventListener("click", (e) => {
   const btn = e.target.closest("button.step");
   if (!btn) return;
-  const input = form.querySelector(`[name="${btn.dataset.target}"]`);
+  const input = btn.closest("form")?.querySelector(`[name="${btn.dataset.target}"]`);
   if (!input) return;
   const min = Number(input.min || 0);
   const max = Number(input.max || 99);
@@ -142,5 +145,56 @@ tbody.addEventListener("change", async (e) => {
   });
 });
 
+function renderSettings(settings, { fillInputs }) {
+  if (fillInputs) {
+    settingsForm.intervalMinutes.value = settings.intervalMinutes;
+    settingsForm.jitterMinutes.value = settings.jitterMinutes;
+  }
+  const { intervalMinutes: base, jitterMinutes: jitter } = settings;
+  const span = jitter > 0 ? `${base}–${base + jitter}` : String(base);
+  let next = "Väntar på schemaläggaren.";
+  if (settings.checking) next = "En koll pågår just nu.";
+  else if (settings.nextCheckAt)
+    next = `Nästa koll kl ${new Date(settings.nextCheckAt).toLocaleTimeString("sv-SE")}.`;
+  const backoff =
+    settings.consecutiveFailures > 0
+      ? ` Väntetiden är uppdubblad efter ${settings.consecutiveFailures} misslyckad(e) cykel/cykler.`
+      : "";
+  settingsStatus.textContent = `Kollar med ${span} minuters mellanrum. ${next}${backoff}`;
+}
+
+async function loadSettings({ fillInputs }) {
+  try {
+    const res = await fetch("/api/settings");
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    renderSettings(await res.json(), { fillInputs });
+  } catch (err) {
+    settingsStatus.textContent = `Kunde inte hämta intervallet: ${err.message}`;
+  }
+}
+
+settingsForm.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  settingsError.textContent = "";
+  try {
+    const res = await fetch("/api/settings", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        intervalMinutes: Number(settingsForm.intervalMinutes.value),
+        jitterMinutes: Number(settingsForm.jitterMinutes.value),
+      }),
+    });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(body.error ?? `HTTP ${res.status}`);
+    renderSettings(body, { fillInputs: true });
+  } catch (err) {
+    settingsError.textContent = err.message;
+  }
+});
+
 loadOptions().then(loadWatches);
+loadSettings({ fillInputs: true });
 setInterval(loadWatches, 15_000);
+// Keep the "next check" line honest without clobbering a value being typed.
+setInterval(() => loadSettings({ fillInputs: false }), 15_000);

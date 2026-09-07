@@ -2,7 +2,7 @@ import Database from "better-sqlite3";
 import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import type { NewWatchInput, Route, VehicleType, Watch, WatchStatus } from "./types.js";
+import { SETTINGS_LIMITS, type NewWatchInput, type Route, type Settings, type VehicleType, type Watch, type WatchStatus } from "./types.js";
 
 const DATA_DIR = path.resolve("data");
 fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -29,6 +29,13 @@ const SCHEMA = `
 `;
 
 db.exec(SCHEMA);
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+  )
+`);
 
 // The pre-V1 schema stored a pasted search URL instead of a departure. It cannot be
 // migrated into the new model, so replace it — see README.
@@ -115,6 +122,39 @@ export function setActive(id: string, active: boolean): void {
 
 export function deleteWatch(id: string): void {
   db.prepare("DELETE FROM watches WHERE id = ?").run(id);
+}
+
+function clamp(value: number, { min, max }: { min: number; max: number }): number {
+  return Math.min(max, Math.max(min, value));
+}
+
+/**
+ * A stored number, or the `.env` value, or the built-in default. The env vars stay the
+ * defaults for a fresh install; once the UI writes a setting, the stored value wins.
+ */
+function readNumber(key: keyof Settings, envName: string, fallback: number): number {
+  const row = db.prepare("SELECT value FROM settings WHERE key = ?").get(key) as
+    | { value: string }
+    | undefined;
+  const raw = Number(row?.value ?? process.env[envName] ?? fallback);
+  return clamp(Number.isFinite(raw) ? raw : fallback, SETTINGS_LIMITS[key]);
+}
+
+export function getSettings(): Settings {
+  return {
+    intervalMinutes: readNumber("intervalMinutes", "CHECK_INTERVAL_MINUTES", 10),
+    jitterMinutes: readNumber("jitterMinutes", "CHECK_JITTER_MINUTES", 5),
+  };
+}
+
+export function saveSettings(settings: Settings): Settings {
+  const write = db.prepare(
+    "INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value"
+  );
+  for (const [key, value] of Object.entries(settings)) {
+    write.run(key, String(clamp(value, SETTINGS_LIMITS[key as keyof Settings])));
+  }
+  return getSettings();
 }
 
 export function recordCheckResult(

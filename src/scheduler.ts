@@ -1,4 +1,4 @@
-import { getWatch, listWatches, recordCheckResult, setActive } from "./db.js";
+import { getSettings, getWatch, listWatches, recordCheckResult, setActive } from "./db.js";
 import { sendDiscordNotification } from "./notifier.js";
 import { checkAvailability, summarizeOffer } from "./scraper.js";
 import { VEHICLE_LABELS, type CheckResult, type Watch } from "./types.js";
@@ -120,41 +120,65 @@ export function nextDelayMs(
 const MAX_BACKOFF_FACTOR = 8;
 
 let timer: NodeJS.Timeout | undefined;
+let consecutiveFailures = 0;
+let nextCheckAt: string | null = null;
+
+/** The interval is read fresh here, so a change in the UI applies from the next cycle on. */
+function scheduleNext(): void {
+  const { intervalMinutes, jitterMinutes } = getSettings();
+  const delay = nextDelayMs(intervalMinutes, jitterMinutes, consecutiveFailures);
+  const at = new Date(Date.now() + delay);
+  nextCheckAt = at.toISOString();
+  const note = consecutiveFailures > 0 ? ` (backoff after ${consecutiveFailures} failed cycle(s))` : "";
+  console.log(`Next check at ${at.toLocaleTimeString("sv-SE")}${note}.`);
+  timer = setTimeout(tick, delay);
+  timer.unref?.();
+}
+
+async function tick(): Promise<void> {
+  try {
+    const outcome = await runCycle();
+    consecutiveFailures = outcome.failed ? consecutiveFailures + 1 : 0;
+  } catch (error) {
+    console.error("Check cycle threw:", error);
+    consecutiveFailures++;
+  }
+  scheduleNext();
+}
 
 export function startScheduler(): void {
-  const baseMinutes = Number(process.env.CHECK_INTERVAL_MINUTES ?? "10");
-  const jitterMinutes = Number(process.env.CHECK_JITTER_MINUTES ?? "5");
-  let consecutiveFailures = 0;
-
+  const { intervalMinutes, jitterMinutes } = getSettings();
   console.log(
-    `Scheduling checks every ${baseMinutes}–${baseMinutes + jitterMinutes} minute(s), with backoff on repeated failures.`
+    `Scheduling checks every ${intervalMinutes}–${intervalMinutes + jitterMinutes} minute(s), with backoff on repeated failures.`
   );
-
-  const scheduleNext = () => {
-    const delay = nextDelayMs(baseMinutes, jitterMinutes, consecutiveFailures);
-    const when = new Date(Date.now() + delay).toLocaleTimeString("sv-SE");
-    const note = consecutiveFailures > 0 ? ` (backoff after ${consecutiveFailures} failed cycle(s))` : "";
-    console.log(`Next check at ${when}${note}.`);
-    timer = setTimeout(tick, delay);
-    timer.unref?.();
-  };
-
-  const tick = async () => {
-    try {
-      const outcome = await runCycle();
-      consecutiveFailures = outcome.failed ? consecutiveFailures + 1 : 0;
-    } catch (error) {
-      console.error("Check cycle threw:", error);
-      consecutiveFailures++;
-    }
-    scheduleNext();
-  };
 
   // Run once at startup so you don't have to wait for the first interval.
   void tick();
 }
 
+/**
+ * Re-arm the timer with the current settings, so a shortened interval takes effect now
+ * instead of after the pending wait. A cycle in flight schedules its own next tick from
+ * the fresh settings, so leave that one alone rather than ending up with two timers.
+ */
+export function rescheduleNow(): void {
+  if (running) return;
+  if (timer) clearTimeout(timer);
+  scheduleNext();
+}
+
+export function getSchedulerState(): {
+  nextCheckAt: string | null;
+  checking: boolean;
+  consecutiveFailures: number;
+} {
+  // While a cycle runs, `nextCheckAt` still holds the time it was started at, which would
+  // read as a check that is overdue. Report the cycle instead.
+  return { nextCheckAt: running ? null : nextCheckAt, checking: running, consecutiveFailures };
+}
+
 export function stopScheduler(): void {
   if (timer) clearTimeout(timer);
   timer = undefined;
+  nextCheckAt = null;
 }

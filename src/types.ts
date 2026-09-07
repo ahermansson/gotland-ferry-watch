@@ -90,6 +90,19 @@ export interface NewWatchInput {
   vehicle?: VehicleType;
 }
 
+/** How often the scheduler runs a check cycle. Editable from the web UI. */
+export interface Settings {
+  /** Base minutes between cycles. */
+  intervalMinutes: number;
+  /** Random minutes added on top, so checks don't land on the same clock tick every hour. */
+  jitterMinutes: number;
+}
+
+export const SETTINGS_LIMITS = {
+  intervalMinutes: { min: 1, max: 240 },
+  jitterMinutes: { min: 0, max: 60 },
+} as const;
+
 export interface CheckResult {
   status: WatchStatus;
   detail: string;

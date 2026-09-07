@@ -1,9 +1,17 @@
 import cors from "cors";
 import express from "express";
 import path from "node:path";
-import { createWatch, deleteWatch, listWatches, setActive } from "./db.js";
-import { runSingleCheck } from "./scheduler.js";
-import { ROUTES, VEHICLE_LABELS, type NewWatchInput, type Route, type VehicleType } from "./types.js";
+import { createWatch, deleteWatch, getSettings, listWatches, saveSettings, setActive } from "./db.js";
+import { getSchedulerState, rescheduleNow, runSingleCheck } from "./scheduler.js";
+import {
+  ROUTES,
+  SETTINGS_LIMITS,
+  VEHICLE_LABELS,
+  type NewWatchInput,
+  type Route,
+  type Settings,
+  type VehicleType,
+} from "./types.js";
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const TIME_RE = /^\d{2}:\d{2}$/;
@@ -16,6 +24,37 @@ export function createServer() {
 
   app.get("/api/options", (_req, res) => {
     res.json({ routes: ROUTES, vehicles: VEHICLE_LABELS });
+  });
+
+  app.get("/api/settings", (_req, res) => {
+    res.json({ ...getSettings(), ...getSchedulerState(), limits: SETTINGS_LIMITS });
+  });
+
+  app.put("/api/settings", (req, res) => {
+    const body = req.body as Partial<Record<keyof Settings, unknown>>;
+    const current = getSettings();
+    const errors: string[] = [];
+
+    const parse = (key: keyof Settings): number => {
+      if (body[key] === undefined) return current[key];
+      const value = Number(body[key]);
+      const { min, max } = SETTINGS_LIMITS[key];
+      if (!Number.isInteger(value) || value < min || value > max) {
+        errors.push(`${key} måste vara ett heltal ${min}–${max}`);
+      }
+      return value;
+    };
+
+    const settings = { intervalMinutes: parse("intervalMinutes"), jitterMinutes: parse("jitterMinutes") };
+    if (errors.length) {
+      res.status(400).json({ error: errors.join(", ") });
+      return;
+    }
+
+    const saved = saveSettings(settings);
+    // Re-arm now, so a shortened interval doesn't wait out the pending one.
+    rescheduleNow();
+    res.json({ ...saved, ...getSchedulerState(), limits: SETTINGS_LIMITS });
   });
 
   app.get("/api/watches", (_req, res) => {

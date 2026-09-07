@@ -62,6 +62,34 @@
         <tbody></tbody>
       </table>
     </section>
+
+    <section class="card">
+      <h2>Kontrollintervall</h2>
+      <form id="settings-form">
+        <div class="row">
+          <label>Minuter mellan koll
+            <div class="stepper">
+              <button type="button" class="step" data-target="intervalMinutes" data-delta="-1" aria-label="Minska intervall">−</button>
+              <input name="intervalMinutes" type="number" min="1" max="240" inputmode="numeric" required />
+              <button type="button" class="step" data-target="intervalMinutes" data-delta="1" aria-label="Öka intervall">+</button>
+            </div>
+          </label>
+          <label>Slumpmässigt påslag (minuter)
+            <div class="stepper">
+              <button type="button" class="step" data-target="jitterMinutes" data-delta="-1" aria-label="Minska påslag">−</button>
+              <input name="jitterMinutes" type="number" min="0" max="60" inputmode="numeric" required />
+              <button type="button" class="step" data-target="jitterMinutes" data-delta="1" aria-label="Öka påslag">+</button>
+            </div>
+          </label>
+        </div>
+        <p class="hint" id="settings-status">Laddar…</p>
+        <p class="hint">En koll tar ~30–40 sekunder per bevakning. Påslaget gör att kollarna inte
+          landar på samma klockslag varje timme. Misslyckas alla kollar i en cykel fördubblas
+          väntetiden (max 8×) tills en lyckas.</p>
+        <button type="submit">Spara</button>
+        <span id="settings-error" class="error"></span>
+      </form>
+    </section>
   </main>
   <script src="/app.js"></script>
 </body>
