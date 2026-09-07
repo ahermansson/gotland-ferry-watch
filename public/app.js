@@ -145,7 +145,20 @@ tbody.addEventListener("change", async (e) => {
   });
 });
 
+const SETTING_KEYS = ["intervalMinutes", "jitterMinutes", "activeFrom", "activeTo"];
+
 function renderSettings(settings, { fillInputs }) {
+  // A server from before a setting existed answers without it. Filling the form with
+  // `undefined` would blank the fields, and an absent window reads as "around the clock",
+  // so say what happened instead of showing a setting that isn't the one in force.
+  const missing = SETTING_KEYS.filter((key) => settings[key] === undefined);
+  if (missing.length) {
+    settingsStatus.textContent =
+      `Servern svarade utan ${missing.join(", ")}. Den kör troligen en äldre version än` +
+      " sidan — starta om den (npm start).";
+    return;
+  }
+
   if (fillInputs) {
     settingsForm.intervalMinutes.value = settings.intervalMinutes;
     settingsForm.jitterMinutes.value = settings.jitterMinutes;
