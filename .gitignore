@@ -4,3 +4,4 @@ data/
 debug/
 .env
 *.log
+.DS_Store
