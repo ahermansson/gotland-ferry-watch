@@ -148,3 +148,35 @@ td small { color: #666; }
 .stepper .step:hover {
   background: #f0f0f0;
 }
+
+.countdown-card {
+  text-align: center;
+  padding: 1.25rem 1.5rem 1rem;
+}
+
+.countdown-label {
+  margin: 0;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #666;
+}
+
+.countdown {
+  margin: 0.25rem 0 0;
+  font-size: clamp(2.75rem, 13vw, 4.5rem);
+  font-weight: 700;
+  line-height: 1.1;
+  /* Fixed-width digits, so the number doesn't twitch as it counts down. */
+  font-variant-numeric: tabular-nums;
+}
+
+/* Outside the window there is nothing to count down to, so it reads as a clock time. */
+.countdown.paused,
+.countdown.idle {
+  color: #888;
+}
+
+.countdown-card .hint {
+  margin: 0.6rem 0 0;
+}

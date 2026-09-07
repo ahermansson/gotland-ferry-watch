@@ -89,6 +89,11 @@ The **Kontrollintervall** card at the bottom of the web UI sets how often the wa
 checked: a base interval in minutes plus a random jitter added on top, so `5` + `3` means
 a check every 5–8 minutes. It also shows when the next check is due.
 
+A countdown at the top of the page shows how long until the next cycle starts — a cycle
+checks every active watch in turn, so once more than one watch is active there is no
+single "next check" to count down to. Outside the window it shows the clock time the next
+cycle starts instead, since that wait is hours rather than minutes.
+
 The same card sets the daily window the checks run in (default 06:00–00:00, Swedish time —
 nobody releases ferry tickets at 03:00, and nobody books one then either). Outside the
 window the scheduler sleeps until it opens rather than waking up to do nothing, so a night

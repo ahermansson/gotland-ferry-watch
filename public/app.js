@@ -4,6 +4,8 @@ const formError = document.querySelector("#form-error");
 const settingsForm = document.querySelector("#settings-form");
 const settingsError = document.querySelector("#settings-error");
 const settingsStatus = document.querySelector("#settings-status");
+const countdownEl = document.querySelector("#countdown");
+const countdownLabel = document.querySelector("#countdown-label");
 
 let vehicleLabels = {};
 
@@ -147,12 +149,59 @@ tbody.addEventListener("change", async (e) => {
 
 const SETTING_KEYS = ["intervalMinutes", "jitterMinutes", "activeFrom", "activeTo"];
 
+/** Last payload from /api/settings, so the countdown can tick between polls. */
+let schedulerState = null;
+let lastDueRefresh = 0;
+
+function formatRemaining(ms) {
+  const total = Math.max(0, Math.round(ms / 1000));
+  const pad = (n) => String(n).padStart(2, "0");
+  const hours = Math.floor(total / 3600);
+  const rest = `${pad(Math.floor((total % 3600) / 60))}:${pad(total % 60)}`;
+  return hours > 0 ? `${hours}:${rest}` : rest;
+}
+
+const clockTime = (iso) =>
+  new Date(iso).toLocaleTimeString("sv-SE", { hour: "2-digit", minute: "2-digit" });
+
+/**
+ * Counts down to the start of the next cycle — a cycle checks every watch in turn, so
+ * there is no single "next check" to aim at once more than one watch is active.
+ */
+function renderCountdown() {
+  const state = schedulerState;
+  const show = (label, value, tone) => {
+    countdownLabel.textContent = label;
+    countdownEl.textContent = value;
+    countdownEl.className = `countdown${tone ? ` ${tone}` : ""}`;
+  };
+
+  if (!state) return show("Nästa cykel", "–", "idle");
+  if (state.checking) return show("Pågår nu", "Kollar…", "idle");
+  if (!state.nextCheckAt) return show("Nästa cykel", "–", "idle");
+  // Outside the window the wait is hours, which is a clock time, not a countdown.
+  if (state.paused) return show("Nästa cykel startar", clockTime(state.nextCheckAt), "paused");
+
+  const remaining = new Date(state.nextCheckAt) - Date.now();
+  if (remaining <= 0) {
+    // The cycle is due; ask the server rather than sitting at 00:00 until the next poll.
+    if (Date.now() - lastDueRefresh > 5000) {
+      lastDueRefresh = Date.now();
+      loadSettings({ fillInputs: false });
+    }
+    return show("Pågår nu", "Kollar…", "idle");
+  }
+  show("Nästa cykel startar om", formatRemaining(remaining));
+}
+
 function renderSettings(settings, { fillInputs }) {
   // A server from before a setting existed answers without it. Filling the form with
   // `undefined` would blank the fields, and an absent window reads as "around the clock",
   // so say what happened instead of showing a setting that isn't the one in force.
   const missing = SETTING_KEYS.filter((key) => settings[key] === undefined);
   if (missing.length) {
+    schedulerState = null;
+    renderCountdown();
     settingsStatus.textContent =
       `Servern svarade utan ${missing.join(", ")}. Den kör troligen en äldre version än` +
       " sidan — starta om den (npm start).";
@@ -170,18 +219,14 @@ function renderSettings(settings, { fillInputs }) {
   const window =
     activeFrom === activeTo ? "dygnet runt" : `mellan ${activeFrom} och ${activeTo}`;
 
-  let next = "Väntar på schemaläggaren.";
-  if (settings.checking) next = "En koll pågår just nu.";
-  else if (settings.paused && settings.nextCheckAt)
-    next = `Pausad – återupptas kl ${new Date(settings.nextCheckAt).toLocaleTimeString("sv-SE")}.`;
-  else if (settings.nextCheckAt)
-    next = `Nästa koll kl ${new Date(settings.nextCheckAt).toLocaleTimeString("sv-SE")}.`;
-
   const backoff =
     settings.consecutiveFailures > 0
       ? ` Väntetiden är uppdubblad efter ${settings.consecutiveFailures} misslyckad(e) cykel/cykler.`
       : "";
-  settingsStatus.textContent = `Kollar med ${span} minuters mellanrum ${window}. ${next}${backoff}`;
+  settingsStatus.textContent = `Kollar med ${span} minuters mellanrum ${window}.${backoff}`;
+
+  schedulerState = settings;
+  renderCountdown();
 }
 
 async function loadSettings({ fillInputs }) {
@@ -218,6 +263,8 @@ settingsForm.addEventListener("submit", async (e) => {
 
 loadOptions().then(loadWatches);
 loadSettings({ fillInputs: true });
+renderCountdown();
+setInterval(renderCountdown, 1000);
 setInterval(loadWatches, 15_000);
 // Keep the "next check" line honest without clobbering a value being typed.
 setInterval(() => loadSettings({ fillInputs: false }), 15_000);

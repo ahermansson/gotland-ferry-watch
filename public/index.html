@@ -10,6 +10,12 @@
     <h1>Gotland Ferry Watch</h1>
     <p class="subtitle">Bevakar en specifik avgång hos Destination Gotland och pingar Discord när en salong blir ledig.</p>
 
+    <section class="card countdown-card">
+      <p class="countdown-label" id="countdown-label">Nästa koll om</p>
+      <p class="countdown" id="countdown">–</p>
+      <p class="hint" id="settings-status">Laddar…</p>
+    </section>
+
     <section class="card">
       <h2>Lägg till bevakning</h2>
       <form id="add-form">
@@ -90,7 +96,6 @@
             <input name="activeTo" type="time" required />
           </label>
         </div>
-        <p class="hint" id="settings-status">Laddar…</p>
         <p class="hint">En koll tar ~30–40 sekunder per bevakning. Påslaget gör att kollarna inte
           landar på samma klockslag varje timme. Misslyckas alla kollar i en cykel fördubblas
           väntetiden (max 8×) tills en lyckas.</p>
