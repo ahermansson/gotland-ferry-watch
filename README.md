@@ -103,6 +103,11 @@ fresh install.
 
 ## Running it continuously
 
+Several watches are checked one after another in the same cycle, and the interval is the
+gap *between* cycles rather than a fixed period — so the more watches you add, the less
+often each one is checked. With ~35 seconds per check plus 5–20 seconds between them,
+three watches take around two minutes per cycle.
+
 This is a plain Node process (`npm start`), meant to be left running. Options:
 
 - **tmux/screen**: `tmux new -s ferry-watch`, run `npm start`, detach.
@@ -118,7 +123,12 @@ minutes) — not for bulk scraping. Please:
 
 - Keep the check interval reasonable. One check takes ~30–40 seconds per watch.
 - Checks are spaced by the base interval plus random jitter, so they don't land on the
-  same clock tick every hour, and they run sequentially — never in parallel.
+  same clock tick every hour, and they run sequentially — never in parallel. Inside a
+  cycle the watches are spaced 5–20 seconds apart too, so several watches don't go out as
+  one burst.
+- Only one check runs at a time, whatever asked for it: **Kolla nu** queues behind the
+  check in progress rather than opening a second session alongside a running cycle. It
+  waits out one check, not the whole cycle.
 - If every check in a cycle fails, the interval doubles (capped at 8×, so ~80–120 min)
   until one succeeds. If the site is pushing back, knocking at the same rate helps nobody.
 - Checks pause outside the daily window (06:00–00:00 by default), so the site sees

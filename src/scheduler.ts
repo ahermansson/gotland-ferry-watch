@@ -3,11 +3,35 @@ import { sendDiscordNotification } from "./notifier.js";
 import { checkAvailability, summarizeOffer } from "./scraper.js";
 import { VEHICLE_LABELS, type CheckResult, type Watch } from "./types.js";
 
+/**
+ * One scrape at a time, whoever asked for it. A cycle is sequential on its own, but
+ * "Kolla nu" arrives over HTTP and would otherwise open a second session against the site
+ * mid-cycle. The cycle takes the lock per watch rather than holding it throughout, so a
+ * manual check waits out one check (~35 s), not the whole cycle.
+ */
+let checkLock: Promise<unknown> = Promise.resolve();
+let scraping = false;
+
+function withCheckLock<T>(run: () => Promise<T>): Promise<T> {
+  const result = checkLock.then(async () => {
+    scraping = true;
+    try {
+      return await run();
+    } finally {
+      scraping = false;
+    }
+  });
+  // Queue on a chain that always settles, so one failed check doesn't strand the rest.
+  checkLock = result.catch(() => undefined);
+  return result;
+}
+
 export async function runSingleCheck(watchId: string): Promise<CheckResult | undefined> {
   const watch = getWatch(watchId);
   if (!watch) return undefined;
 
-  const result = await checkAvailability(watch);
+  // The notification stays outside the lock — a slow webhook shouldn't hold up a check.
+  const result = await withCheckLock(() => checkAvailability(watch));
   const becameAvailable = result.status === "available" && watch.lastStatus !== "available";
 
   recordCheckResult(watch.id, result.status, result.detail, becameAvailable);
@@ -61,6 +85,16 @@ export interface CycleOutcome {
 
 let running = false;
 
+/** Random pause between the watches in a cycle. */
+const CHECK_SPACING_MS = { min: 5_000, max: 20_000 };
+
+export function spacingMs(random: () => number = Math.random): number {
+  const { min, max } = CHECK_SPACING_MS;
+  return Math.round(min + random() * (max - min));
+}
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
 export async function runCycle(): Promise<CycleOutcome> {
   if (running) {
     console.log("Previous check cycle still running, skipping this tick.");
@@ -80,7 +114,7 @@ export async function runCycle(): Promise<CycleOutcome> {
     console.log(`Checking ${watches.length} active watch(es)...`);
 
     let failures = 0;
-    for (const watch of watches) {
+    for (const [index, watch] of watches.entries()) {
       try {
         const result = await runSingleCheck(watch.id);
         console.log(`  ${watch.label}: ${result?.status ?? "error"}`);
@@ -89,6 +123,9 @@ export async function runCycle(): Promise<CycleOutcome> {
         console.error(`  ${watch.label}: check threw`, error);
         failures++;
       }
+      // The jitter spaces the cycles apart; without this the checks inside one cycle
+      // still go out back to back, which is exactly the burst the jitter avoids.
+      if (index < watches.length - 1) await sleep(spacingMs());
     }
 
     return {
@@ -242,7 +279,8 @@ export function getSchedulerState(): {
   // read as a check that is overdue. Report the cycle instead.
   return {
     nextCheckAt: running ? null : nextCheckAt,
-    checking: running,
+    // A manual check counts too — it is a session against the site like any other.
+    checking: running || scraping,
     paused,
     consecutiveFailures,
   };
