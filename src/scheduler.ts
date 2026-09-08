@@ -68,15 +68,13 @@ export async function runSingleCheck(watchId: string): Promise<CheckResult | und
   return result;
 }
 
-/** The trip a watch is after, on one line. */
+/**
+ * The header line. Route, date and departure used to live here too, but each leg now
+ * states its own — repeating them above only pushed the legs off a phone screen.
+ */
 function describeWatch(watch: Watch): string {
-  const trip = watch.returnTime
-    ? `${watch.date} kl ${watch.departureTime} → ${watch.returnDate} kl ${watch.returnTime}`
-    : `${watch.date} kl ${watch.departureTime}`;
-  return (
-    `${watch.label}\n${watch.route.replace("-", " → ")}, ${trip} · ` +
-    `${watch.adults} vuxen/vuxna · ${VEHICLE_LABELS[watch.vehicle]}`
-  );
+  const who = `${watch.adults} ${watch.adults === 1 ? "vuxen" : "vuxna"}`;
+  return `${watch.label}\n${who} · ${VEHICLE_LABELS[watch.vehicle]}`;
 }
 
 /**

@@ -3,6 +3,7 @@ import path from "node:path";
 import { chromium, type Browser, type BrowserContext, type Page } from "playwright";
 import {
   SALONG_TIERS,
+  TIER_ORDER,
   VEHICLE_LABELS,
   type CheckResult,
   type DepartureOffer,
@@ -329,20 +330,32 @@ async function readLeg(
   return { offer: { departure: departureTime, arrival: matching[0]?.arrival ?? null, fares, leg } };
 }
 
-/** One leg's worth of prose, whichever way it turned out. */
-function describeLeg(offer: DepartureOffer): string {
-  const what = offer.leg === "out" ? "Avgång" : "Returavgång";
-  if (isBookable(offer)) return `${what} ${offer.departure}:\n${summarizeOffer(offer)}`;
-  if (offer.fares.every((f) => f.soldOut)) {
-    return `${what} ${offer.departure} är slutsåld — ingen biljettklass går att välja.`;
-  }
-  return `${what} ${offer.departure}: biljettklasser finns kvar, men alla salonger är slutsålda.\n${summarizeOffer(offer)}`;
+/** "Nynäshamn-Visby" as the two ends of one leg, reversed for the way home. */
+function legRoute(route: string, leg: TripLeg): string {
+  const [from, to] = route.split("-");
+  return leg === "out" ? `${from} → ${to}` : `${to} → ${from}`;
+}
+
+/**
+ * One leg as its own short block — direction, where to where, when, and what is free.
+ * Read on a phone, so every line has to survive being wrapped at about thirty characters.
+ */
+function describeLeg(offer: DepartureOffer, route: string, date: string): string {
+  const arrow = offer.leg === "out" ? "➡️" : "⬅️";
+  const body = offer.fares.every((f) => f.soldOut) ? "🟥 Slutsåld" : summarizeOffer(offer);
+  const when = offer.arrival ? `${offer.departure} → ${offer.arrival}` : offer.departure;
+  return `${arrow} **${legRoute(route, offer.leg)}**\n${date} ${when}\n${body}`;
 }
 
 /** Both legs of a return trip, or just the one for a one-way watch. */
-export function describeTrip(offer: DepartureOffer, returnOffer?: DepartureOffer): string {
-  if (!returnOffer) return describeLeg(offer);
-  return `${describeLeg(offer)}\n\n${describeLeg(returnOffer)}`;
+export function describeTrip(
+  watch: Pick<Watch, "route" | "date" | "returnDate">,
+  offer: DepartureOffer,
+  returnOffer?: DepartureOffer
+): string {
+  const out = describeLeg(offer, watch.route, watch.date);
+  if (!returnOffer) return out;
+  return `${out}\n\n${describeLeg(returnOffer, watch.route, watch.returnDate ?? "")}`;
 }
 
 /**
@@ -423,7 +436,7 @@ export async function checkAvailability(watch: Watch): Promise<CheckResult> {
 
     return {
       status,
-      detail: describeTrip(offer, returnLeg),
+      detail: describeTrip(watch, offer, returnLeg),
       offer,
       returnOffer: returnLeg,
       ...extra,
@@ -445,30 +458,34 @@ export async function checkAvailability(watch: Watch): Promise<CheckResult> {
   }
 }
 
-/** Human-readable summary of what is bookable, used in the Discord message and the UI. */
+/**
+ * The lounges still bookable, named and nothing else. Prices belong on the booking page,
+ * not in a notification read on a phone — what decides anything here is whether one of the
+ * preferred lounges is among them.
+ */
 export function summarizeOffer(offer: DepartureOffer): string {
-  const lines: string[] = [];
-  for (const fare of offer.fares) {
-    if (fare.soldOut) {
-      lines.push(`• ${fare.fare}: slutsåld`);
-      continue;
-    }
-    const free = fare.salongs.filter((s) => !s.soldOut);
-    if (free.length === 0) {
-      lines.push(`• ${fare.fare} ${fare.price ?? ""}: inga lediga salonger`.trim());
-      continue;
-    }
-    const rendered = free
-      .map((s) => `${tierMark(s.tier)}${s.name}${s.price ? ` ${s.price}` : ""}`)
-      .join(", ");
-    lines.push(`• ${fare.fare}${fare.price ? ` ${fare.price}` : ""}: ${rendered}`);
+  const free = bookableSalongs(offer);
+  if (free.length === 0) return "🟥 Inga platser";
+
+  const preferred = free.filter((s) => s.tier === "preferred");
+  const rest = free.filter((s) => s.tier !== "preferred");
+
+  if (preferred.length === 0) {
+    return `🟥 Ingen för- eller aktersalong\nFinns: ${rest.slice(0, 3).map((s) => s.name).join(", ")}`;
   }
-  return lines.join("\n");
+  const line = `⭐ ${preferred.map((s) => s.name).join(", ")}`;
+  if (rest.length === 0) return line;
+  return `${line}\n+ ${rest.length} ${rest.length === 1 ? "annan salong" : "andra salonger"}`;
 }
 
-function tierMark(tier: SalongOffer["tier"]): string {
-  if (tier === "preferred") return "⭐ ";
-  if (tier === "acceptable") return "👍 ";
-  if (tier === "last-resort") return "⚠️ ";
-  return "";
+/** Every lounge still bookable in any fare class, best tier first, each named once. */
+function bookableSalongs(offer: DepartureOffer): SalongOffer[] {
+  const seen = new Map<string, SalongOffer>();
+  for (const fare of offer.fares) {
+    if (fare.soldOut) continue;
+    for (const salong of fare.salongs) {
+      if (!salong.soldOut && !seen.has(salong.name)) seen.set(salong.name, salong);
+    }
+  }
+  return [...seen.values()].sort((a, b) => TIER_ORDER.indexOf(a.tier) - TIER_ORDER.indexOf(b.tier));
 }

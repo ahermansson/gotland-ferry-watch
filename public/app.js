@@ -60,7 +60,7 @@ async function loadWatches() {
       <td>${escapeHtml(w.label)}</td>
       <td>${trip}</td>
       <td class="status-${w.lastStatus}">${statusLabel(w.lastStatus)}</td>
-      <td class="detail">${escapeHtml(w.lastDetail ?? "–").replace(/\n/g, "<br />")}</td>
+      <td class="detail">${formatDetail(w.lastDetail)}</td>
       <td>${escapeHtml(lastChecked)}</td>
       <td><input type="checkbox" data-action="toggle" data-id="${w.id}" ${w.active ? "checked" : ""} /></td>
       <td class="actions">
@@ -85,6 +85,16 @@ function iconButton({ action, id, icon, label, busy = false, danger = false }) {
     ` title="${escapeHtml(label)}" aria-label="${escapeHtml(label)}"${busy ? " disabled" : ""}>` +
     `${icon}</button>`
   );
+}
+
+/**
+ * The detail is written for Discord, where **stars** mean bold. Escape it first, then let
+ * that one bit of markup through — otherwise the table shows the asterisks.
+ */
+function formatDetail(detail) {
+  return escapeHtml(detail ?? "–")
+    .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+    .replace(/\n/g, "<br />");
 }
 
 function statusLabel(status) {
