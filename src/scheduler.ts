@@ -205,9 +205,24 @@ let timer: NodeJS.Timeout | undefined;
 let consecutiveFailures = 0;
 let nextCheckAt: string | null = null;
 let paused = false;
+let idle = false;
 
 /** Settings are read fresh here, so a change in the UI applies from the next cycle on. */
 function scheduleNext(): void {
+  // Nothing to check means nothing to schedule. An empty cycle would still wake up, find
+  // no watches and re-arm, which shows up as a countdown that reaches zero and does
+  // nothing. The watch list only changes through the UI, and each of those routes re-arms
+  // the timer, so idling here cannot strand a watch that is switched back on.
+  if (!listWatches().some((w) => w.active)) {
+    idle = true;
+    paused = false;
+    nextCheckAt = null;
+    timer = undefined;
+    console.log("No active watch — idle until one is added or switched back on.");
+    return;
+  }
+  idle = false;
+
   const { intervalMinutes, jitterMinutes, activeFrom, activeTo } = getSettings();
   const now = new Date();
   let delay: number;
@@ -273,10 +288,27 @@ export function rescheduleNow(): void {
   scheduleNext();
 }
 
+/**
+ * Runs a cycle right now. Adding a watch is a question asked of the site, so answer it
+ * instead of making the first check wait out a full interval. A cycle already in flight
+ * is left alone — it would only put a second session against the site alongside it, and
+ * it schedules the next one itself when it finishes.
+ */
+export function startCycleNow(): void {
+  if (running) return;
+  if (timer) clearTimeout(timer);
+  timer = undefined;
+  // There is a watch and a cycle starting on it, so say so now rather than at the end of
+  // the cycle when the next timer is armed.
+  idle = false;
+  void tick();
+}
+
 export function getSchedulerState(): {
   nextCheckAt: string | null;
   checking: boolean;
   paused: boolean;
+  idle: boolean;
   consecutiveFailures: number;
 } {
   // While a cycle runs, `nextCheckAt` still holds the time it was started at, which would
@@ -286,6 +318,8 @@ export function getSchedulerState(): {
     // A manual check counts too — it is a session against the site like any other.
     checking: running || scraping,
     paused,
+    // No active watch at all, which is a different thing from waiting out the window.
+    idle,
     consecutiveFailures,
   };
 }
@@ -295,4 +329,5 @@ export function stopScheduler(): void {
   timer = undefined;
   nextCheckAt = null;
   paused = false;
+  idle = false;
 }

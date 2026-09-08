@@ -2,7 +2,7 @@ import cors from "cors";
 import express from "express";
 import path from "node:path";
 import { createWatch, deleteWatch, getSettings, listWatches, saveSettings, setActive } from "./db.js";
-import { getSchedulerState, rescheduleNow, runSingleCheck } from "./scheduler.js";
+import { getSchedulerState, rescheduleNow, runSingleCheck, startCycleNow } from "./scheduler.js";
 import {
   ROUTES,
   SETTINGS_LIMITS,
@@ -105,6 +105,9 @@ export function createServer() {
       adults,
       vehicle,
     });
+    // Adding a watch is the one action that earns a check straight away, rather than just
+    // waking the idle scheduler and waiting out an interval to find out.
+    startCycleNow();
     res.status(201).json(watch);
   });
 
@@ -112,12 +115,17 @@ export function createServer() {
     const { active } = req.body as { active?: boolean };
     if (typeof active === "boolean") {
       setActive(req.params.id, active);
+      // Switching one on starts the timer; switching the last one off stops it, so the
+      // page stops counting down to a cycle that would have nothing to check.
+      rescheduleNow();
     }
     res.status(204).end();
   });
 
   app.delete("/api/watches/:id", (req, res) => {
     deleteWatch(req.params.id);
+    // Deleting the last active watch idles the scheduler, same as switching it off.
+    rescheduleNow();
     res.status(204).end();
   });
 
