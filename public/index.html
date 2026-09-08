@@ -90,10 +90,12 @@
         </div>
         <div class="row">
           <label>Kolla från
-            <input name="activeFrom" type="time" required />
+            <input name="activeFrom" placeholder="06:00" pattern="([01]\d|2[0-3]):[0-5]\d"
+              inputmode="numeric" maxlength="5" title="24-timmarstid, HH:MM" required />
           </label>
           <label>Kolla till
-            <input name="activeTo" type="time" required />
+            <input name="activeTo" placeholder="00:00" pattern="([01]\d|2[0-3]):[0-5]\d"
+              inputmode="numeric" maxlength="5" title="24-timmarstid, HH:MM" required />
           </label>
         </div>
         <p class="hint">En koll tar ~30–40 sekunder per bevakning. Påslaget gör att kollarna inte
