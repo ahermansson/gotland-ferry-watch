@@ -126,8 +126,16 @@ export function createWatch(input: NewWatchInput): Watch {
   return watch;
 }
 
+/**
+ * Switching a watch back on starts a fresh search, so the old notification stamp goes with
+ * it — otherwise the watch would run on without ever notifying again.
+ */
 export function setActive(id: string, active: boolean): void {
-  db.prepare("UPDATE watches SET active = ? WHERE id = ?").run(active ? 1 : 0, id);
+  if (active) {
+    db.prepare("UPDATE watches SET active = 1, notified_at = NULL WHERE id = ?").run(id);
+  } else {
+    db.prepare("UPDATE watches SET active = 0 WHERE id = ?").run(id);
+  }
 }
 
 export function deleteWatch(id: string): void {
@@ -185,20 +193,16 @@ export function saveSettings(settings: Settings): Settings {
   return getSettings();
 }
 
-export function recordCheckResult(
-  id: string,
-  status: WatchStatus,
-  detail: string,
-  notified: boolean
-): void {
-  const now = new Date().toISOString();
-  if (notified) {
-    db.prepare(
-      "UPDATE watches SET last_status = ?, last_checked_at = ?, last_detail = ?, notified_at = ? WHERE id = ?"
-    ).run(status, now, detail, now, id);
-  } else {
-    db.prepare(
-      "UPDATE watches SET last_status = ?, last_checked_at = ?, last_detail = ? WHERE id = ?"
-    ).run(status, now, detail, id);
-  }
+export function recordCheckResult(id: string, status: WatchStatus, detail: string): void {
+  db.prepare(
+    "UPDATE watches SET last_status = ?, last_checked_at = ?, last_detail = ? WHERE id = ?"
+  ).run(status, new Date().toISOString(), detail, id);
+}
+
+/**
+ * Stamps the watch as notified. Only a delivered notification may set this — it is what
+ * tells the next check that the search is done, so a failed webhook has to leave it null.
+ */
+export function markNotified(id: string): void {
+  db.prepare("UPDATE watches SET notified_at = ? WHERE id = ?").run(new Date().toISOString(), id);
 }

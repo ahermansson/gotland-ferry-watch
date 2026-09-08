@@ -1,4 +1,4 @@
-import { getSettings, getWatch, listWatches, recordCheckResult, setActive } from "./db.js";
+import { getSettings, getWatch, listWatches, markNotified, recordCheckResult, setActive } from "./db.js";
 import { sendDiscordNotification } from "./notifier.js";
 import { checkAvailability, summarizeOffer } from "./scraper.js";
 import { VEHICLE_LABELS, type CheckResult, type Watch } from "./types.js";
@@ -32,11 +32,14 @@ export async function runSingleCheck(watchId: string): Promise<CheckResult | und
 
   // The notification stays outside the lock — a slow webhook shouldn't hold up a check.
   const result = await withCheckLock(() => checkAvailability(watch));
-  const becameAvailable = result.status === "available" && watch.lastStatus !== "available";
+  // What decides this is whether a notification has landed, not how the status moved. A
+  // failed webhook leaves the watch available and still searching, and keying off the
+  // transition would then skip every later check — the status never changes again.
+  const shouldNotify = result.status === "available" && !watch.notifiedAt;
 
-  recordCheckResult(watch.id, result.status, result.detail, becameAvailable);
+  recordCheckResult(watch.id, result.status, result.detail);
 
-  if (becameAvailable) {
+  if (shouldNotify) {
     const vehicle = VEHICLE_LABELS[watch.vehicle];
     const header =
       `🚢 **Ledig plats!** ${watch.label}\n` +
@@ -48,6 +51,7 @@ export async function runSingleCheck(watchId: string): Promise<CheckResult | und
     // The notification is the point of the watch, so stop once it lands. If it did not,
     // keep watching — otherwise a failed webhook would silently end the search.
     if (delivered) {
+      markNotified(watch.id);
       setActive(watch.id, false);
       console.log(`  ${watch.label}: notified, watch deactivated.`);
     } else {
