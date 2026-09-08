@@ -57,6 +57,11 @@
             <input name="returnTime" placeholder="16:30" pattern="\d{2}:\d{2}" />
           </label>
         </div>
+        <label class="inline-check">
+          <input type="checkbox" id="auto-book" />
+          Autoboka när platsen dyker upp
+        </label>
+        <div id="booking-block" hidden></div>
         <p class="hint">Avgångstiden måste matcha sajtens tabell exakt, t.ex. <code>07:15</code>.</p>
         <button type="submit">Lägg till</button>
         <span id="form-error" class="error"></span>
@@ -74,6 +79,7 @@
             <th>Lediga biljetter</th>
             <th>Senast kollad</th>
             <th>Aktiv</th>
+            <th>Auto</th>
             <th></th>
           </tr>
         </thead>

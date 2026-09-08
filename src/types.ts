@@ -46,6 +46,49 @@ export const SALONG_TIERS: Record<string, SalongTier> = {
 
 export const TIER_ORDER: SalongTier[] = ["preferred", "acceptable", "last-resort", "other"];
 
+/**
+ * The lounges an auto-booking may be pointed at. Cabins are deliberately absent: they cost
+ * several times a lounge seat, and nothing should buy one because a lounge sold out.
+ */
+export const BOOKABLE_SALONGS = [
+  "Försalong",
+  "Aktersalong",
+  "Mittsalong",
+  "Ekonomiplats",
+  "Barnsalong",
+  "Djursalong",
+] as const;
+
+/** The three fare classes, in the order the site lists them. */
+export const FARE_CLASSES = ["Mini", "Flexi", "Flexi +"] as const;
+export type FareClass = (typeof FARE_CLASSES)[number];
+
+/**
+ * What an auto-booking is allowed to buy for one watch. The fare classes are a ranked
+ * list — the highest ranked one that can be booked wins, so refundability can outrank
+ * price — while the lounges are a plain allowlist and the cheapest permitted one is taken.
+ */
+export interface BookingPrefs {
+  /** Off until switched on, per watch, on top of the global switch. */
+  autoBook: boolean;
+  /** Ranked, best first. A class left out is never bought. */
+  fareOrder: FareClass[];
+  /** Unordered: whichever of these is cheapest gets booked. */
+  salongs: string[];
+  /** Total for the whole trip in kronor, both legs. Over it, the booking is abandoned. */
+  maxPrice: number | null;
+  /** Platsreservation, the paid seat add-on under Tillval. */
+  seatReservation: boolean;
+}
+
+export const DEFAULT_BOOKING_PREFS: BookingPrefs = {
+  autoBook: false,
+  fareOrder: ["Mini", "Flexi", "Flexi +"],
+  salongs: ["Försalong", "Aktersalong"],
+  maxPrice: null,
+  seatReservation: false,
+};
+
 export interface SalongOffer {
   name: string;
   price: string | null;
@@ -96,6 +139,7 @@ export interface Watch {
    * trip isn't announced every five minutes — but the other leg opening still is.
    */
   partialNotifiedLeg: TripLeg | null;
+  booking: BookingPrefs;
   createdAt: string;
 }
 
@@ -108,6 +152,7 @@ export interface NewWatchInput {
   returnTime?: string | null;
   adults?: number;
   vehicle?: VehicleType;
+  booking?: Partial<BookingPrefs>;
 }
 
 /** How often, and when, the scheduler runs a check cycle. Editable from the web UI. */

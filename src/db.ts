@@ -10,6 +10,9 @@ import {
   type Settings,
   type TimeSetting,
   type VehicleType,
+  DEFAULT_BOOKING_PREFS,
+  type BookingPrefs,
+  type FareClass,
   type TripLeg,
   type Watch,
   type WatchStatus,
@@ -38,6 +41,11 @@ const SCHEMA = `
     last_detail TEXT,
     notified_at TEXT,
     partial_notified_leg TEXT,
+    auto_book INTEGER NOT NULL DEFAULT 0,
+    fare_order TEXT,
+    salongs TEXT,
+    max_price INTEGER,
+    seat_reservation INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL
   )
 `;
@@ -67,6 +75,11 @@ for (const [name, ddl] of [
   ["return_date", "ALTER TABLE watches ADD COLUMN return_date TEXT"],
   ["return_time", "ALTER TABLE watches ADD COLUMN return_time TEXT"],
   ["partial_notified_leg", "ALTER TABLE watches ADD COLUMN partial_notified_leg TEXT"],
+  ["auto_book", "ALTER TABLE watches ADD COLUMN auto_book INTEGER NOT NULL DEFAULT 0"],
+  ["fare_order", "ALTER TABLE watches ADD COLUMN fare_order TEXT"],
+  ["salongs", "ALTER TABLE watches ADD COLUMN salongs TEXT"],
+  ["max_price", "ALTER TABLE watches ADD COLUMN max_price INTEGER"],
+  ["seat_reservation", "ALTER TABLE watches ADD COLUMN seat_reservation INTEGER NOT NULL DEFAULT 0"],
 ] as const) {
   if (!db.prepare("PRAGMA table_info(watches)").all().some((c) => (c as { name: string }).name === name)) {
     db.exec(ddl);
@@ -89,7 +102,18 @@ interface WatchRow {
   last_detail: string | null;
   notified_at: string | null;
   partial_notified_leg: string | null;
+  auto_book: number;
+  fare_order: string | null;
+  salongs: string | null;
+  max_price: number | null;
+  seat_reservation: number;
   created_at: string;
+}
+
+/** A column written before the setting existed reads as the default, not as an empty list. */
+function parseList(value: string | null, fallback: readonly string[]): string[] {
+  if (value === null) return [...fallback];
+  return value.split(",").map((s) => s.trim()).filter(Boolean);
 }
 
 function rowToWatch(row: WatchRow): Watch {
@@ -109,6 +133,14 @@ function rowToWatch(row: WatchRow): Watch {
     lastDetail: row.last_detail,
     notifiedAt: row.notified_at,
     partialNotifiedLeg: (row.partial_notified_leg as TripLeg | null) ?? null,
+    booking: {
+      autoBook: row.auto_book === 1,
+      // Stored as a list rather than a set: the order is the preference.
+      fareOrder: parseList(row.fare_order, DEFAULT_BOOKING_PREFS.fareOrder) as FareClass[],
+      salongs: parseList(row.salongs, DEFAULT_BOOKING_PREFS.salongs),
+      maxPrice: row.max_price,
+      seatReservation: row.seat_reservation === 1,
+    },
     createdAt: row.created_at,
   };
 }
@@ -141,14 +173,23 @@ export function createWatch(input: NewWatchInput): Watch {
     lastDetail: null,
     notifiedAt: null,
     partialNotifiedLeg: null,
+    booking: { ...DEFAULT_BOOKING_PREFS, ...input.booking },
     createdAt: new Date().toISOString(),
   };
 
   db.prepare(
     `INSERT INTO watches
-      (id, label, route, date, departure_time, return_date, return_time, adults, vehicle, active, last_status, last_checked_at, last_detail, notified_at, partial_notified_leg, created_at)
-     VALUES (@id, @label, @route, @date, @departureTime, @returnDate, @returnTime, @adults, @vehicle, @active, @lastStatus, @lastCheckedAt, @lastDetail, @notifiedAt, @partialNotifiedLeg, @createdAt)`
-  ).run({ ...watch, active: watch.active ? 1 : 0 });
+      (id, label, route, date, departure_time, return_date, return_time, adults, vehicle, active, last_status, last_checked_at, last_detail, notified_at, partial_notified_leg, auto_book, fare_order, salongs, max_price, seat_reservation, created_at)
+     VALUES (@id, @label, @route, @date, @departureTime, @returnDate, @returnTime, @adults, @vehicle, @active, @lastStatus, @lastCheckedAt, @lastDetail, @notifiedAt, @partialNotifiedLeg, @autoBook, @fareOrder, @salongs, @maxPrice, @seatReservation, @createdAt)`
+  ).run({
+    ...watch,
+    active: watch.active ? 1 : 0,
+    autoBook: watch.booking.autoBook ? 1 : 0,
+    fareOrder: watch.booking.fareOrder.join(","),
+    salongs: watch.booking.salongs.join(","),
+    maxPrice: watch.booking.maxPrice,
+    seatReservation: watch.booking.seatReservation ? 1 : 0,
+  });
 
   return watch;
 }
@@ -232,6 +273,25 @@ export function recordCheckResult(id: string, status: WatchStatus, detail: strin
  * Stamps the watch as notified. Only a delivered notification may set this — it is what
  * tells the next check that the search is done, so a failed webhook has to leave it null.
  */
+/**
+ * Updates the booking settings of one watch. Everything is replaced together, so a
+ * half-saved form cannot leave a watch allowed to buy a fare class nobody ticked.
+ */
+export function saveBookingPrefs(id: string, prefs: BookingPrefs): void {
+  db.prepare(
+    `UPDATE watches
+        SET auto_book = ?, fare_order = ?, salongs = ?, max_price = ?, seat_reservation = ?
+      WHERE id = ?`
+  ).run(
+    prefs.autoBook ? 1 : 0,
+    prefs.fareOrder.join(","),
+    prefs.salongs.join(","),
+    prefs.maxPrice,
+    prefs.seatReservation ? 1 : 0,
+    id
+  );
+}
+
 /** Remembers which single leg was last reported, so the same half trip isn't re-announced. */
 export function markPartialNotified(id: string, leg: TripLeg | null): void {
   db.prepare("UPDATE watches SET partial_notified_leg = ? WHERE id = ?").run(leg, id);

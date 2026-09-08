@@ -207,8 +207,8 @@ td small { color: #666; }
   margin: 0;
 }
 
-.stepper .step {
-  flex: 0 0 2.4rem;
+/* The quiet square button, shared by the number steppers and the rank arrows. */
+.step {
   background: #fff;
   color: #000;
   border: 1px solid #ccc;
@@ -219,8 +219,12 @@ td small { color: #666; }
   cursor: pointer;
 }
 
-.stepper .step:hover {
+.step:hover {
   background: #f0f0f0;
+}
+
+.stepper .step {
+  flex: 0 0 2.4rem;
 }
 
 .countdown-card {
@@ -260,4 +264,116 @@ td small { color: #666; }
 
 .countdown-card .hint {
   margin: 0.6rem 0 0;
+}
+
+/* --- Booking settings, shown in the add form and per watch --------------------------- */
+
+.booking-prefs {
+  background: #fafbfc;
+  border: 1px solid #eee;
+  border-radius: 8px;
+  padding: 0.9rem 1rem 1rem;
+  margin-bottom: 0.75rem;
+}
+
+.prefs-title {
+  margin: 0 0 0.4rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #555;
+}
+
+.prefs-title + .rank,
+.prefs-title + .chips {
+  margin-bottom: 1rem;
+}
+
+/* The order of these rows is the setting, so they read as a list, not as a pick-any. */
+.rank {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  counter-reset: rank;
+}
+
+.rank li {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.3rem 0;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.rank li::before {
+  counter-increment: rank;
+  content: counter(rank) ".";
+  width: 1.2rem;
+  color: #888;
+  font-size: 0.85rem;
+}
+
+.rank li label {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0;
+}
+
+.rank input[type="checkbox"],
+.chip input[type="checkbox"] {
+  display: inline;
+  width: auto;
+  margin: 0;
+}
+
+.rank-buttons {
+  display: flex;
+  gap: 0.25rem;
+}
+
+.rank-buttons .step {
+  width: 1.9rem;
+  height: 1.9rem;
+  font-size: 0.9rem;
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.35rem 0.6rem;
+  border: 1px solid #ddd;
+  border-radius: 999px;
+  background: #fff;
+  font-size: 0.85rem;
+  margin: 0;
+}
+
+.chip:has(input:checked) {
+  border-color: #f5a623;
+  background: #fff8ec;
+}
+
+.inline-check.seat {
+  align-self: end;
+  margin-bottom: 0.75rem;
+}
+
+/* The panel is a row of its own under the watch it belongs to. */
+.prefs-row > td {
+  background: #f7f9fb;
+  padding: 1rem;
+}
+
+.prefs-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
 }

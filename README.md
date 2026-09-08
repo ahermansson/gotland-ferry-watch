@@ -30,6 +30,31 @@ Both the fare classes and the lounges mark sold-out state the same way: a disabl
 control reading *Slutsålt*, versus a price when bookable. The scraper reads that
 structural signal rather than guessing at page wording.
 
+## Return trips
+
+A watch can follow both legs of a return trip: tick **Tur och retur** when adding it and
+give the return date and departure. The site stacks both legs on one results page with
+nothing but the text *Välj returresa* between them, so the scraper splits them on that
+marker and tags every fare button with the leg it belongs to — without it a watch on 07:15
+out would match the 07:15 coming back.
+
+A return watch is only **available** when both legs have a bookable lounge. One leg alone
+is a **partial** hit: you are told, since you may want to take the single, but the watch
+keeps running. The leg is remembered, so the same half-open trip isn't announced every
+cycle while the other leg opening still is.
+
+## Auto-booking settings
+
+Each watch carries what an auto-booking would be allowed to buy: the fare classes in
+ranked order (the highest ranked one that can be booked wins), the lounges that will do
+(the cheapest permitted one is taken), a price cap for the whole trip, and whether to add
+the paid seat reservation. The **Auto** switch in the table turns it on for that watch.
+
+**Nothing books anything yet.** The switch and the settings are in place, but the booking
+engine is not written — see `npm run recon` for the tool used to map the booking flow. A
+price cap is required before auto-booking can be switched on: it is the one limit that
+still holds when everything else misreads.
+
 ## Lounge priority
 
 Lounges are grouped into tiers, shown in notifications as:
