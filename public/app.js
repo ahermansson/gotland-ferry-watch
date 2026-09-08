@@ -8,6 +8,15 @@ const countdownEl = document.querySelector("#countdown");
 const countdownLabel = document.querySelector("#countdown-label");
 
 let vehicleLabels = {};
+/** Watches with a manual check in flight. A check takes ~35 s and the table redraws every
+ * 15 s, so without this the button springs back to "Kolla nu" mid-check and the check
+ * looks like it never ran. */
+const checking = new Set();
+
+// Inline so a row costs no extra request, and stroke-drawn so they take the button's own
+// colour on hover and when disabled.
+const ICON_RUN = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="23 4 23 10 17 10" /><polyline points="1 20 1 14 7 14" /><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" /></svg>`;
+const ICON_DELETE = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /><line x1="10" y1="11" x2="10" y2="17" /><line x1="14" y1="11" x2="14" y2="17" /></svg>`;
 
 async function loadOptions() {
   const res = await fetch("/api/options");
@@ -51,13 +60,28 @@ async function loadWatches() {
       <td class="detail">${escapeHtml(w.lastDetail ?? "–").replace(/\n/g, "<br />")}</td>
       <td>${escapeHtml(lastChecked)}</td>
       <td><input type="checkbox" data-action="toggle" data-id="${w.id}" ${w.active ? "checked" : ""} /></td>
-      <td>
-        <button class="secondary" data-action="check" data-id="${w.id}">Kolla nu</button>
-        <button class="secondary" data-action="delete" data-id="${w.id}">Ta bort</button>
+      <td class="actions">
+        ${iconButton({
+          action: "check",
+          id: w.id,
+          icon: ICON_RUN,
+          label: checking.has(w.id) ? "Kollar…" : "Kör nu",
+          busy: checking.has(w.id),
+        })}
+        ${iconButton({ action: "delete", id: w.id, icon: ICON_DELETE, label: "Ta bort", danger: true })}
       </td>
     `;
     tbody.appendChild(tr);
   }
+}
+
+function iconButton({ action, id, icon, label, busy = false, danger = false }) {
+  const classes = ["icon-btn", danger ? "danger" : "", busy ? "spinning" : ""].filter(Boolean);
+  return (
+    `<button class="${classes.join(" ")}" data-action="${action}" data-id="${id}"` +
+    ` title="${escapeHtml(label)}" aria-label="${escapeHtml(label)}"${busy ? " disabled" : ""}>` +
+    `${icon}</button>`
+  );
 }
 
 function statusLabel(status) {
@@ -108,6 +132,7 @@ form.addEventListener("submit", async (e) => {
     document.querySelector("#route-select").value = "Visby-Nynäshamn";
     document.querySelector("#vehicle-select").value = "car-under-225";
     await loadWatches();
+    await loadSettings({ fillInputs: false });
   } catch (err) {
     formError.textContent = err.message;
   }
@@ -122,9 +147,10 @@ tbody.addEventListener("click", async (e) => {
     if (!confirm("Ta bort denna bevakning?")) return;
     await fetch(`/api/watches/${id}`, { method: "DELETE" });
     await loadWatches();
+    await loadSettings({ fillInputs: false });
   } else if (action === "check") {
-    btn.disabled = true;
-    btn.textContent = "Kollar...";
+    checking.add(id);
+    await loadWatches();
     try {
       const res = await fetch(`/api/watches/${id}/check`, { method: "POST" });
       if (!res.ok) {
@@ -132,6 +158,7 @@ tbody.addEventListener("click", async (e) => {
         formError.textContent = `Kontrollen misslyckades: ${body.error ?? res.status}`;
       }
     } finally {
+      checking.delete(id);
       await loadWatches();
     }
   }
@@ -145,6 +172,8 @@ tbody.addEventListener("change", async (e) => {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ active: input.checked }),
   });
+  // The server starts or idles the timer on this, so don't wait out the 15 s poll to say so.
+  await loadSettings({ fillInputs: false });
 });
 
 const SETTING_KEYS = ["intervalMinutes", "jitterMinutes", "activeFrom", "activeTo"];
@@ -178,6 +207,9 @@ function renderCountdown() {
 
   if (!state) return show("Nästa cykel", "–", "idle");
   if (state.checking) return show("Pågår nu", "Kollar…", "idle");
+  // Nothing is being watched, so there is no cycle to count down to. Say that rather than
+  // showing a clock that runs out and does nothing.
+  if (state.idle) return show("", "Ingen aktiv bevakning", "idle text");
   if (!state.nextCheckAt) return show("Nästa cykel", "–", "idle");
   // Outside the window the wait is hours, which is a clock time, not a countdown.
   if (state.paused) return show("Nästa cykel startar", clockTime(state.nextCheckAt), "paused");
@@ -223,7 +255,10 @@ function renderSettings(settings, { fillInputs }) {
     settings.consecutiveFailures > 0
       ? ` Väntetiden är uppdubblad efter ${settings.consecutiveFailures} misslyckad(e) cykel/cykler.`
       : "";
-  settingsStatus.textContent = `Kollar med ${span} minuters mellanrum ${window}.${backoff}`;
+  settingsStatus.textContent = settings.idle
+    ? `Inget kollas just nu. Slå på en bevakning eller lägg till en ny, så körs kontrollerna` +
+      ` med ${span} minuters mellanrum ${window}.`
+    : `Kollar med ${span} minuters mellanrum ${window}.${backoff}`;
 
   schedulerState = settings;
   renderCountdown();
