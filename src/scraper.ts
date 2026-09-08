@@ -44,9 +44,16 @@ export async function closeBrowser(): Promise<void> {
   browser = undefined;
 }
 
+/** Only the consent banner's own cookies belong in the stored state. */
+const CONSENT_COOKIE = /^CookieInformation/i;
+
 /**
- * The cookie banner (Cookie Information) covers the widget until it is dismissed. We keep
- * only its cookies — not localStorage — so a stored search never leaks between checks.
+ * The cookie banner (Cookie Information) covers the widget until it is dismissed. Only its
+ * cookies are kept — not localStorage, and above all not the site's session.
+ *
+ * Storing the whole jar looked harmless until a session id that had been used to log in
+ * came back on every later run: the site then reads as that account, with its prices, and
+ * anything booked would land on it. The stored state has to carry consent and nothing else.
  */
 async function dismissConsent(page: Page, ctx: BrowserContext): Promise<void> {
   const decline = page.locator("#declineButton");
@@ -58,8 +65,9 @@ async function dismissConsent(page: Page, ctx: BrowserContext): Promise<void> {
   await decline.click();
   await page.waitForTimeout(1500);
   const state = await ctx.storageState();
+  const cookies = state.cookies.filter((c) => CONSENT_COOKIE.test(c.name));
   fs.mkdirSync(path.dirname(STATE_FILE), { recursive: true });
-  fs.writeFileSync(STATE_FILE, JSON.stringify({ cookies: state.cookies, origins: [] }, null, 2));
+  fs.writeFileSync(STATE_FILE, JSON.stringify({ cookies, origins: [] }, null, 2));
 }
 
 function loadConsentState(): string | undefined {
