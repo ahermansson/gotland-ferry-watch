@@ -10,6 +10,7 @@ import {
   type Settings,
   type TimeSetting,
   type VehicleType,
+  type TripLeg,
   type Watch,
   type WatchStatus,
 } from "./types.js";
@@ -27,6 +28,8 @@ const SCHEMA = `
     route TEXT NOT NULL,
     date TEXT NOT NULL,
     departure_time TEXT NOT NULL,
+    return_date TEXT,
+    return_time TEXT,
     adults INTEGER NOT NULL DEFAULT 2,
     vehicle TEXT NOT NULL DEFAULT 'car-under-225',
     active INTEGER NOT NULL DEFAULT 1,
@@ -34,6 +37,7 @@ const SCHEMA = `
     last_checked_at TEXT,
     last_detail TEXT,
     notified_at TEXT,
+    partial_notified_leg TEXT,
     created_at TEXT NOT NULL
   )
 `;
@@ -56,12 +60,27 @@ if (!columns.some((c) => c.name === "departure_time")) {
   db.exec(SCHEMA);
 }
 
+// The return leg and its notification stamp were added after the first watches were
+// created, and unlike the pre-V1 change they carry no information that needs rewriting —
+// an existing watch is simply a one-way one. So add the columns rather than start over.
+for (const [name, ddl] of [
+  ["return_date", "ALTER TABLE watches ADD COLUMN return_date TEXT"],
+  ["return_time", "ALTER TABLE watches ADD COLUMN return_time TEXT"],
+  ["partial_notified_leg", "ALTER TABLE watches ADD COLUMN partial_notified_leg TEXT"],
+] as const) {
+  if (!db.prepare("PRAGMA table_info(watches)").all().some((c) => (c as { name: string }).name === name)) {
+    db.exec(ddl);
+  }
+}
+
 interface WatchRow {
   id: string;
   label: string;
   route: string;
   date: string;
   departure_time: string;
+  return_date: string | null;
+  return_time: string | null;
   adults: number;
   vehicle: string;
   active: number;
@@ -69,6 +88,7 @@ interface WatchRow {
   last_checked_at: string | null;
   last_detail: string | null;
   notified_at: string | null;
+  partial_notified_leg: string | null;
   created_at: string;
 }
 
@@ -79,6 +99,8 @@ function rowToWatch(row: WatchRow): Watch {
     route: row.route as Route,
     date: row.date,
     departureTime: row.departure_time,
+    returnDate: row.return_date,
+    returnTime: row.return_time,
     adults: row.adults,
     vehicle: row.vehicle as VehicleType,
     active: row.active === 1,
@@ -86,6 +108,7 @@ function rowToWatch(row: WatchRow): Watch {
     lastCheckedAt: row.last_checked_at,
     lastDetail: row.last_detail,
     notifiedAt: row.notified_at,
+    partialNotifiedLeg: (row.partial_notified_leg as TripLeg | null) ?? null,
     createdAt: row.created_at,
   };
 }
@@ -107,6 +130,9 @@ export function createWatch(input: NewWatchInput): Watch {
     route: input.route,
     date: input.date,
     departureTime: input.departureTime,
+    // Both or neither: half a return leg would search for a trip nobody asked for.
+    returnDate: input.returnDate && input.returnTime ? input.returnDate : null,
+    returnTime: input.returnDate && input.returnTime ? input.returnTime : null,
     adults: input.adults ?? 2,
     vehicle: input.vehicle ?? "car-under-225",
     active: true,
@@ -114,13 +140,14 @@ export function createWatch(input: NewWatchInput): Watch {
     lastCheckedAt: null,
     lastDetail: null,
     notifiedAt: null,
+    partialNotifiedLeg: null,
     createdAt: new Date().toISOString(),
   };
 
   db.prepare(
     `INSERT INTO watches
-      (id, label, route, date, departure_time, adults, vehicle, active, last_status, last_checked_at, last_detail, notified_at, created_at)
-     VALUES (@id, @label, @route, @date, @departureTime, @adults, @vehicle, @active, @lastStatus, @lastCheckedAt, @lastDetail, @notifiedAt, @createdAt)`
+      (id, label, route, date, departure_time, return_date, return_time, adults, vehicle, active, last_status, last_checked_at, last_detail, notified_at, partial_notified_leg, created_at)
+     VALUES (@id, @label, @route, @date, @departureTime, @returnDate, @returnTime, @adults, @vehicle, @active, @lastStatus, @lastCheckedAt, @lastDetail, @notifiedAt, @partialNotifiedLeg, @createdAt)`
   ).run({ ...watch, active: watch.active ? 1 : 0 });
 
   return watch;
@@ -132,7 +159,9 @@ export function createWatch(input: NewWatchInput): Watch {
  */
 export function setActive(id: string, active: boolean): void {
   if (active) {
-    db.prepare("UPDATE watches SET active = 1, notified_at = NULL WHERE id = ?").run(id);
+    db.prepare(
+      "UPDATE watches SET active = 1, notified_at = NULL, partial_notified_leg = NULL WHERE id = ?"
+    ).run(id);
   } else {
     db.prepare("UPDATE watches SET active = 0 WHERE id = ?").run(id);
   }
@@ -203,6 +232,11 @@ export function recordCheckResult(id: string, status: WatchStatus, detail: strin
  * Stamps the watch as notified. Only a delivered notification may set this — it is what
  * tells the next check that the search is done, so a failed webhook has to leave it null.
  */
+/** Remembers which single leg was last reported, so the same half trip isn't re-announced. */
+export function markPartialNotified(id: string, leg: TripLeg | null): void {
+  db.prepare("UPDATE watches SET partial_notified_leg = ? WHERE id = ?").run(leg, id);
+}
+
 export function markNotified(id: string): void {
   db.prepare("UPDATE watches SET notified_at = ? WHERE id = ?").run(new Date().toISOString(), id);
 }

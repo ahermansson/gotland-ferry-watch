@@ -51,7 +51,10 @@ async function loadWatches() {
   for (const w of watches) {
     const tr = document.createElement("tr");
     const lastChecked = w.lastCheckedAt ? new Date(w.lastCheckedAt).toLocaleString("sv-SE") : "–";
-    const trip = `${w.route.replace("-", " → ")}<br /><small>${escapeHtml(w.date)} kl ${escapeHtml(w.departureTime)} · ${w.adults} vuxna · ${escapeHtml(vehicleLabels[w.vehicle] ?? w.vehicle)}</small>`;
+    const back = w.returnTime
+      ? `<br /><small>retur ${escapeHtml(w.returnDate)} kl ${escapeHtml(w.returnTime)}</small>`
+      : "";
+    const trip = `${w.route.replace("-", " → ")}<br /><small>${escapeHtml(w.date)} kl ${escapeHtml(w.departureTime)} · ${w.adults} vuxna · ${escapeHtml(vehicleLabels[w.vehicle] ?? w.vehicle)}</small>${back}`;
 
     tr.innerHTML = `
       <td>${escapeHtml(w.label)}</td>
@@ -86,6 +89,8 @@ function iconButton({ action, id, icon, label, busy = false, danger = false }) {
 
 function statusLabel(status) {
   if (status === "available") return "Ledig plats!";
+  // Only a return watch can land here: one leg open, the other not.
+  if (status === "partial") return "Halv träff";
   if (status === "full") return "Fullbokad";
   return "Okänt";
 }
@@ -112,6 +117,18 @@ document.addEventListener("click", (e) => {
   input.value = String(Math.min(max, Math.max(min, next)));
 });
 
+// The return fields only make sense for a return watch, and an empty one must not be
+// submitted half-filled — so clearing them is part of switching it off.
+const roundTrip = document.querySelector("#round-trip");
+const returnFields = document.querySelector("#return-fields");
+roundTrip.addEventListener("change", () => {
+  returnFields.hidden = !roundTrip.checked;
+  if (!roundTrip.checked) {
+    form.returnDate.value = "";
+    form.returnTime.value = "";
+  }
+});
+
 form.addEventListener("submit", async (e) => {
   e.preventDefault();
   formError.textContent = "";
@@ -129,6 +146,7 @@ form.addEventListener("submit", async (e) => {
       throw new Error(body.error ?? `HTTP ${res.status}`);
     }
     form.reset();
+    returnFields.hidden = true;
     document.querySelector("#route-select").value = "Visby-Nynäshamn";
     document.querySelector("#vehicle-select").value = "car-under-225";
     await loadWatches();

@@ -8,7 +8,9 @@ import {
   type DepartureOffer,
   type FareOffer,
   type SalongOffer,
+  type TripLeg,
   type Watch,
+  type WatchStatus,
 } from "./types.js";
 
 const BASE_URL = "https://www.destinationgotland.se/";
@@ -18,6 +20,7 @@ const STATE_FILE = path.resolve("data", "consent-state.json");
 /** Booking widget control ids, verified against the live site. */
 const BTN_ROUTE = "#booking-widget-transport-button-11";
 const BTN_DATE = "#booking-widget-transport-button-9";
+const BTN_DATE_RETURN = "#booking-widget-transport-button-10";
 const BTN_PASSENGERS = "#booking-widget-transport-button-1";
 const BTN_VEHICLE = "#booking-widget-transport-button-13";
 const OVERLAY = ".BookingWidgetOverlayContent";
@@ -79,9 +82,13 @@ function dayTimestamp(isoDate: string): number {
   throw new Error(`Could not resolve Stockholm midnight for ${isoDate}`);
 }
 
-async function setOneWay(page: Page): Promise<void> {
+/**
+ * The widget opens on "Tur och retur", so a one-way search is the one that has to click.
+ * A return watch leaves it alone and fills the second date instead.
+ */
+async function setTripType(page: Page, roundTrip: boolean): Promise<void> {
   const checkbox = page.locator("input[type=checkbox]").first();
-  if (await checkbox.isChecked()) {
+  if ((await checkbox.isChecked()) !== roundTrip) {
     await page.getByText("Tur och retur", { exact: true }).first().click();
     await page.waitForTimeout(1000);
   }
@@ -97,10 +104,14 @@ async function setRoute(page: Page, route: string): Promise<void> {
   await page.waitForTimeout(1200);
 }
 
-async function setDate(page: Page, isoDate: string): Promise<void> {
+async function setDate(page: Page, isoDate: string, button = BTN_DATE): Promise<void> {
   const target = dayTimestamp(isoDate);
-  await page.locator(BTN_DATE).click();
   const overlay = page.locator(OVERLAY);
+  // Picking the outbound date of a return trip can leave the picker open on the return
+  // month, ready for the second date. Only click the button when it isn't already open.
+  if (!(await overlay.isVisible().catch(() => false))) {
+    await page.locator(button).click();
+  }
   await overlay.waitFor({ state: "visible", timeout: 15_000 });
   await page.waitForTimeout(800);
 
@@ -164,11 +175,19 @@ async function setVehicle(page: Page, vehicle: keyof typeof VEHICLE_LABELS): Pro
 }
 
 /**
- * Tags every fare button with its departure time so we can address a specific one later,
- * and reports what is on the results page.
+ * Tags every fare button with its departure time and its leg, so we can address a specific
+ * one later, and reports what is on the results page.
+ *
+ * A return search stacks both legs on the same page under one heading each, with no id or
+ * data attribute to tell them apart — only the text "Välj returresa" sits between them.
+ * Everything after that marker belongs to the return. Without this a watch on 07:15 out
+ * would happily match a 07:15 sailing coming back.
  */
-async function tagFareButtons(page: Page): Promise<{ departure: string; arrival: string | null; fare: string; price: string | null; soldOut: boolean; key: string }[]> {
+async function tagFareButtons(page: Page): Promise<{ departure: string; arrival: string | null; fare: string; price: string | null; soldOut: boolean; key: string; leg: TripLeg }[]> {
   return page.evaluate(() => {
+    const marker = Array.from(document.querySelectorAll("*")).find(
+      (el) => el.children.length === 0 && /^Välj returresa$/i.test((el.textContent || "").trim())
+    );
     const isFare = (t: string) => /^(Mini|Flexi \+|Flexi)\b/.test(t);
     const out: any[] = [];
     let n = 0;
@@ -189,6 +208,8 @@ async function tagFareButtons(page: Page): Promise<{ departure: string; arrival:
       }
       const key = `fw-${n++}`;
       btn.setAttribute("data-fw-fare", key);
+      const afterMarker =
+        !!marker && !!(marker.compareDocumentPosition(btn) & Node.DOCUMENT_POSITION_FOLLOWING);
       const priceMatch = text.match(/(\d[\d\s]*:-)/);
       out.push({
         departure: times[0] ?? "",
@@ -197,6 +218,7 @@ async function tagFareButtons(page: Page): Promise<{ departure: string; arrival:
         price: priceMatch ? priceMatch[1].trim() : null,
         soldOut: /slutsålt/i.test(text) || (btn as HTMLButtonElement).disabled || btn.className.includes("Mui-disabled"),
         key,
+        leg: afterMarker ? "return" : "out",
       });
     }
     return out;
@@ -264,6 +286,65 @@ async function dumpDebug(watchId: string, page: Page, note: string): Promise<{ s
   return { screenshotPath, textDumpPath };
 }
 
+/** A leg is bookable when any fare still has any lounge that isn't sold out. */
+export function isBookable(offer: DepartureOffer): boolean {
+  return offer.fares.some((f) => !f.soldOut && f.salongs.some((s) => !s.soldOut));
+}
+
+/**
+ * Reads one leg: finds the watched departure among that leg's buttons, expands each fare
+ * that isn't sold out and reads the lounges under it. Returns a sentence instead of an
+ * offer when the departure isn't on the page — the times that were found are the useful
+ * part of that answer, since it usually means a mistyped departure.
+ */
+async function readLeg(
+  page: Page,
+  departureTime: string,
+  leg: TripLeg
+): Promise<{ offer: DepartureOffer } | { missing: string }> {
+  const buttons = (await tagFareButtons(page)).filter((b) => b.leg === leg);
+  const matching = buttons.filter((b) => b.departure === departureTime);
+  const what = leg === "out" ? "Avgång" : "Returavgång";
+
+  if (matching.length === 0) {
+    const found = [...new Set(buttons.map((b) => b.departure).filter(Boolean))];
+    return {
+      missing: found.length
+        ? `${what} ${departureTime} fanns inte i sökresultatet. Hittade: ${found.join(", ")}.`
+        : `Inga ${leg === "out" ? "avgångar" : "returavgångar"} hittades på sökresultatsidan.`,
+    };
+  }
+
+  const fares: FareOffer[] = [];
+  for (const b of matching) {
+    if (b.soldOut) {
+      fares.push({ fare: b.fare, price: b.price, soldOut: true, salongs: [] });
+      continue;
+    }
+    await page.locator(`[data-fw-fare="${b.key}"]`).click();
+    await page.waitForTimeout(3000);
+    fares.push({ fare: b.fare, price: b.price, soldOut: false, salongs: await readSalongs(page, b.key) });
+  }
+
+  return { offer: { departure: departureTime, arrival: matching[0]?.arrival ?? null, fares, leg } };
+}
+
+/** One leg's worth of prose, whichever way it turned out. */
+function describeLeg(offer: DepartureOffer): string {
+  const what = offer.leg === "out" ? "Avgång" : "Returavgång";
+  if (isBookable(offer)) return `${what} ${offer.departure}:\n${summarizeOffer(offer)}`;
+  if (offer.fares.every((f) => f.soldOut)) {
+    return `${what} ${offer.departure} är slutsåld — ingen biljettklass går att välja.`;
+  }
+  return `${what} ${offer.departure}: biljettklasser finns kvar, men alla salonger är slutsålda.\n${summarizeOffer(offer)}`;
+}
+
+/** Both legs of a return trip, or just the one for a one-way watch. */
+export function describeTrip(offer: DepartureOffer, returnOffer?: DepartureOffer): string {
+  if (!returnOffer) return describeLeg(offer);
+  return `${describeLeg(offer)}\n\n${describeLeg(returnOffer)}`;
+}
+
 /**
  * Drives the real booking flow: dismiss consent, fill the search widget, search, then
  * expand each fare on the watched departure and read its lounge availability.
@@ -290,9 +371,11 @@ export async function checkAvailability(watch: Watch): Promise<CheckResult> {
     await page.waitForTimeout(3000);
     await dismissConsent(page, ctx);
 
-    await setOneWay(page);
+    const roundTrip = !!(watch.returnDate && watch.returnTime);
+    await setTripType(page, roundTrip);
     await setRoute(page, watch.route);
     await setDate(page, watch.date);
+    if (roundTrip) await setDate(page, watch.returnDate!, BTN_DATE_RETURN);
     await setPassengers(page, watch.adults);
     await setVehicle(page, watch.vehicle);
 
@@ -305,52 +388,44 @@ export async function checkAvailability(watch: Watch): Promise<CheckResult> {
     }
     await page.waitForTimeout(2000);
 
-    const buttons = await tagFareButtons(page);
-    const forDeparture = buttons.filter((b) => b.departure === watch.departureTime);
-
-    if (forDeparture.length === 0) {
-      const found = [...new Set(buttons.map((b) => b.departure).filter(Boolean))];
+    const outbound = await readLeg(page, watch.departureTime, "out");
+    if ("missing" in outbound) {
       const dumped = await dumpDebug(watch.id, page, `departure ${watch.departureTime} not found`);
-      return {
-        status: "unknown",
-        detail: found.length
-          ? `Avgång ${watch.departureTime} fanns inte i sökresultatet. Hittade: ${found.join(", ")}.`
-          : "Inga avgångar hittades på sökresultatsidan.",
-        ...dumped,
-      };
+      return { status: "unknown", detail: outbound.missing, ...dumped };
     }
 
-    const fares: FareOffer[] = [];
-    for (const b of forDeparture) {
-      if (b.soldOut) {
-        fares.push({ fare: b.fare, price: b.price, soldOut: true, salongs: [] });
-        continue;
+    // The return list may only render once an outbound fare has been expanded, so it is
+    // read after the outbound and the buttons are tagged again rather than reused.
+    let returnLeg: DepartureOffer | undefined;
+    if (roundTrip) {
+      const back = await readLeg(page, watch.returnTime!, "return");
+      if ("missing" in back) {
+        const dumped = await dumpDebug(watch.id, page, `return ${watch.returnTime} not found`);
+        return { status: "unknown", detail: back.missing, ...dumped };
       }
-      await page.locator(`[data-fw-fare="${b.key}"]`).click();
-      await page.waitForTimeout(3000);
-      fares.push({ fare: b.fare, price: b.price, soldOut: false, salongs: await readSalongs(page, b.key) });
+      returnLeg = back.offer;
     }
 
-    const offer: DepartureOffer = {
-      departure: watch.departureTime,
-      arrival: forDeparture[0]?.arrival ?? null,
-      fares,
-    };
-
-    const bookable = fares.some((f) => !f.soldOut && f.salongs.some((s) => !s.soldOut));
-    const status = bookable ? "available" : "full";
+    const offer = outbound.offer;
+    const outBookable = isBookable(offer);
+    const backBookable = returnLeg ? isBookable(returnLeg) : true;
+    // A return watch is only a hit when the whole trip can be booked; one leg on its own
+    // is worth reporting but is not what the watch is waiting for.
+    const status: WatchStatus = outBookable && backBookable
+      ? "available"
+      : roundTrip && (outBookable || backBookable)
+        ? "partial"
+        : "full";
+    const bookable = status === "available";
 
     let extra: { screenshotPath?: string; textDumpPath?: string } = {};
     if (debugAlways) extra = await dumpDebug(watch.id, page, `status=${status}`);
 
     return {
       status,
-      detail: bookable
-        ? summarizeOffer(offer)
-        : fares.every((f) => f.soldOut)
-          ? `Avgång ${watch.departureTime} är slutsåld — ingen biljettklass går att välja.`
-          : `Avgång ${watch.departureTime}: biljettklasser finns kvar, men alla salonger är slutsålda.\n${summarizeOffer(offer)}`,
+      detail: describeTrip(offer, returnLeg),
       offer,
+      returnOffer: returnLeg,
       ...extra,
     };
   } catch (error) {

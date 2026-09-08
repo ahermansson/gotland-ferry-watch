@@ -1,4 +1,9 @@
-export type WatchStatus = "unknown" | "available" | "full";
+/**
+ * "partial" only happens on a return watch: one leg is bookable and the other is not. It
+ * is worth telling you about — you may want to take the single — but it is not the hit
+ * the watch is looking for, so the watch stays on.
+ */
+export type WatchStatus = "unknown" | "available" | "partial" | "full";
 
 /** The four routes the booking widget offers. */
 export type Route =
@@ -56,11 +61,16 @@ export interface FareOffer {
   salongs: SalongOffer[];
 }
 
+/** Which half of a return trip something belongs to. */
+export type TripLeg = "out" | "return";
+
 export interface DepartureOffer {
   /** Departure time as shown on the site, e.g. "07:15". */
   departure: string;
   arrival: string | null;
   fares: FareOffer[];
+  /** Which half of the trip this is. One-way watches only ever produce "out". */
+  leg: TripLeg;
 }
 
 export interface Watch {
@@ -71,6 +81,9 @@ export interface Watch {
   date: string;
   /** Departure time to watch, HH:MM as shown on the site. */
   departureTime: string;
+  /** Return leg, both set or both null. Null means a one-way watch. */
+  returnDate: string | null;
+  returnTime: string | null;
   adults: number;
   vehicle: VehicleType;
   active: boolean;
@@ -78,6 +91,11 @@ export interface Watch {
   lastCheckedAt: string | null;
   lastDetail: string | null;
   notifiedAt: string | null;
+  /**
+   * Which leg was free the last time a partial hit was reported, so the same half-open
+   * trip isn't announced every five minutes — but the other leg opening still is.
+   */
+  partialNotifiedLeg: TripLeg | null;
   createdAt: string;
 }
 
@@ -86,6 +104,8 @@ export interface NewWatchInput {
   route: Route;
   date: string;
   departureTime: string;
+  returnDate?: string | null;
+  returnTime?: string | null;
   adults?: number;
   vehicle?: VehicleType;
 }
@@ -119,6 +139,8 @@ export interface CheckResult {
   detail: string;
   /** The matched departure, when the scrape got far enough to find it. */
   offer?: DepartureOffer;
+  /** The return leg, on a return watch that got that far. */
+  returnOffer?: DepartureOffer;
   screenshotPath?: string;
   textDumpPath?: string;
 }

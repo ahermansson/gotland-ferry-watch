@@ -1,7 +1,15 @@
-import { getSettings, getWatch, listWatches, markNotified, recordCheckResult, setActive } from "./db.js";
+import {
+  getSettings,
+  getWatch,
+  listWatches,
+  markNotified,
+  markPartialNotified,
+  recordCheckResult,
+  setActive,
+} from "./db.js";
 import { sendDiscordNotification } from "./notifier.js";
-import { checkAvailability, summarizeOffer } from "./scraper.js";
-import { VEHICLE_LABELS, type CheckResult, type Watch } from "./types.js";
+import { checkAvailability, isBookable } from "./scraper.js";
+import { VEHICLE_LABELS, type CheckResult, type TripLeg, type Watch } from "./types.js";
 
 /**
  * One scrape at a time, whoever asked for it. A cycle is sequential on its own, but
@@ -40,13 +48,9 @@ export async function runSingleCheck(watchId: string): Promise<CheckResult | und
   recordCheckResult(watch.id, result.status, result.detail);
 
   if (shouldNotify) {
-    const vehicle = VEHICLE_LABELS[watch.vehicle];
-    const header =
-      `🚢 **Ledig plats!** ${watch.label}\n` +
-      `${watch.route.replace("-", " → ")}, ${watch.date} kl ${watch.departureTime} · ` +
-      `${watch.adults} vuxen/vuxna · ${vehicle}`;
-    const body = result.offer ? summarizeOffer(result.offer) : result.detail;
-    const delivered = await sendDiscordNotification(`${header}\n${body}`);
+    const delivered = await sendDiscordNotification(
+      `🚢 **Ledig plats!** ${describeWatch(watch)}\n${result.detail}`
+    );
 
     // The notification is the point of the watch, so stop once it lands. If it did not,
     // keep watching — otherwise a failed webhook would silently end the search.
@@ -57,9 +61,52 @@ export async function runSingleCheck(watchId: string): Promise<CheckResult | und
     } else {
       console.warn(`  ${watch.label}: notification failed, keeping the watch active.`);
     }
+  } else {
+    await reportPartial(watch, result);
   }
 
   return result;
+}
+
+/** The trip a watch is after, on one line. */
+function describeWatch(watch: Watch): string {
+  const trip = watch.returnTime
+    ? `${watch.date} kl ${watch.departureTime} → ${watch.returnDate} kl ${watch.returnTime}`
+    : `${watch.date} kl ${watch.departureTime}`;
+  return (
+    `${watch.label}\n${watch.route.replace("-", " → ")}, ${trip} · ` +
+    `${watch.adults} vuxen/vuxna · ${VEHICLE_LABELS[watch.vehicle]}`
+  );
+}
+
+/**
+ * Half a return trip is worth knowing about — you may want to take the single — but it is
+ * not what the watch is waiting for, so it keeps running. The leg is remembered so the
+ * same half-open trip isn't announced every five minutes, while the *other* leg opening
+ * still is. Falling back to nothing bookable forgets it again.
+ */
+async function reportPartial(watch: Watch, result: CheckResult): Promise<void> {
+  if (result.status !== "partial") {
+    if (watch.partialNotifiedLeg) markPartialNotified(watch.id, null);
+    return;
+  }
+
+  const freeLeg: TripLeg | null = result.offer && isBookable(result.offer)
+    ? "out"
+    : result.returnOffer && isBookable(result.returnOffer)
+      ? "return"
+      : null;
+  if (!freeLeg || freeLeg === watch.partialNotifiedLeg) return;
+
+  const which = freeLeg === "out" ? "utresan" : "returen";
+  const delivered = await sendDiscordNotification(
+    `🟡 **Bara ${which} är ledig** — halv träff, bevakningen fortsätter.\n` +
+      `${describeWatch(watch)}\n${result.detail}`
+  );
+  if (delivered) {
+    markPartialNotified(watch.id, freeLeg);
+    console.log(`  ${watch.label}: partial hit on the ${freeLeg} leg, still watching.`);
+  }
 }
 
 /**

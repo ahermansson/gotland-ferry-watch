@@ -146,7 +146,23 @@ td.actions {
   .icon-btn.spinning svg { animation: none; }
 }
 
+/* A checkbox that labels itself, rather than the stacked label the form uses elsewhere. */
+.inline-check {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+  font-size: 0.9rem;
+}
+
+.inline-check input {
+  display: inline;
+  width: auto;
+  margin: 0;
+}
+
 .status-available { color: #1a7f37; font-weight: 600; }
+.status-partial { color: #a15c00; font-weight: 600; }
 .status-full { color: #b3261e; }
 .status-unknown { color: #888; }
 

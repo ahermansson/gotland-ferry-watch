@@ -86,6 +86,18 @@ export function createServer() {
     if (!body.departureTime || !TIME_RE.test(body.departureTime))
       errors.push("departureTime måste vara HH:MM");
 
+    // Both halves or neither: half a return leg would search for a trip nobody asked for.
+    const returnDate = body.returnDate?.trim() || null;
+    const returnTime = body.returnTime?.trim() || null;
+    if (!!returnDate !== !!returnTime) {
+      errors.push("returresa kräver både returnDate och returnTime");
+    }
+    if (returnDate && !DATE_RE.test(returnDate)) errors.push("returnDate måste vara YYYY-MM-DD");
+    if (returnTime && !TIME_RE.test(returnTime)) errors.push("returnTime måste vara HH:MM");
+    if (returnDate && body.date && returnDate < body.date) {
+      errors.push("returnDate kan inte vara före date");
+    }
+
     const adults = body.adults === undefined ? 2 : Number(body.adults);
     if (!Number.isInteger(adults) || adults < 1 || adults > 9) errors.push("adults måste vara 1–9");
 
@@ -102,6 +114,8 @@ export function createServer() {
       route: body.route as Route,
       date: body.date!,
       departureTime: body.departureTime!,
+      returnDate,
+      returnTime,
       adults,
       vehicle,
     });
