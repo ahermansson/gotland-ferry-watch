@@ -56,6 +56,12 @@ cp .env.example .env
 Edit `.env`:
 - `DISCORD_WEBHOOK_URL` — create one in Discord: **Server Settings → Integrations →
   Webhooks → New Webhook → Copy Webhook URL**. Treat it like a password.
+- `DISCORD_MENTION` — a mention to lead each notification with, `@everyone` by default.
+  Worth keeping: Discord holds back a plain message's mobile push while you look active on
+  another client, and drops it altogether for a muted channel, so a notification can land
+  in the channel without ever reaching your phone. A mention gets through both. Set it to
+  `<@your-user-id>` to ping only yourself, or leave it empty for no mention. Only the
+  mention set here can ping — nothing in the message body does.
 - `CHECK_INTERVAL_MINUTES` / `CHECK_JITTER_MINUTES` — base interval plus random jitter,
   default 10 + 0–5, i.e. an actual interval of 10–15 minutes. These are the starting
   values only: once you save the interval in the web UI, the stored value wins and
