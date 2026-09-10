@@ -2,8 +2,11 @@
  * "partial" only happens on a return watch: one leg is bookable and the other is not. It
  * is worth telling you about — you may want to take the single — but it is not the hit
  * the watch is looking for, so the watch stays on.
+ *
+ * "booked" is never produced by a check — only purchase.ts sets it, once pressBetala has
+ * actually gone through, so it can't be confused with an ordinary "available" hit.
  */
-export type WatchStatus = "unknown" | "available" | "partial" | "full";
+export type WatchStatus = "unknown" | "available" | "partial" | "full" | "booked";
 
 /** The four routes the booking widget offers. */
 export type Route =

@@ -50,10 +50,21 @@ ranked order (the highest ranked one that can be booked wins), the lounges that 
 (the cheapest permitted one is taken), a price cap for the whole trip, and whether to add
 the paid seat reservation. The **Auto** switch in the table turns it on for that watch.
 
-**Nothing books anything yet.** The switch and the settings are in place, but the booking
-engine is not written — see `npm run recon` for the tool used to map the booking flow. A
-price cap is required before auto-booking can be switched on: it is the one limit that
-still holds when everything else misreads.
+When a watch with **Auto** on finds an available departure — and the global
+`AUTO_BOOKING_ENABLED` switch is also on — the scheduler drives the real flow: login, fare
+and lounge selection per the watch's preferences, passengers from saved travellers,
+skipping every paid add-on that wasn't asked for, selecting Reskort and accepting the
+terms. It stops on the checkout page and **asks instead of buying**: a Discord bot (not
+the webhook — a real bot connection, `DISCORD_BOT_TOKEN`) posts the prepared checkout with
+a screenshot and a "Godkänn köp" / "Avbryt" button pair. The browser session is held open,
+parked, until one of the ids in `DISCORD_APPROVERS` clicks — within `BOOKING_APPROVAL_MINUTES`,
+after which it's dropped unpressed and the watch keeps running.
+
+**Betala is only ever clicked in one place** (`pressBetala` in `src/booking.ts`), only
+reachable from the approval click in `src/purchase.ts`. `npm run book -- <watchId>` runs
+the same flow manually for testing and always closes the session unpressed — there is no
+flag that makes it press Betala. A price cap is required before a watch's Auto switch can
+be turned on at all: it is the one limit that still holds when everything else misreads.
 
 ## Lounge priority
 
@@ -175,7 +186,10 @@ minutes) — not for bulk scraping. Please:
 - Expect it to break if the site's widget changes — it depends on element ids like
   `#booking-widget-transport-button-1` and the `Slutsålt` wording.
 
-The scraper never logs in, never proceeds past lounge selection, and never books anything.
+The scraper (used by the scheduled checks) never logs in, never proceeds past lounge
+selection, and never books anything. `npm run book` is a separate, manually-run tool that
+does log in and drive a real purchase up to the checkout page — it is never triggered by
+the scheduler.
 
 ## Project structure
 
@@ -185,7 +199,10 @@ src/
   server.ts      Express app + REST API for the UI
   scheduler.ts   self-scheduling check loop, with jitter and failure backoff
   scraper.ts     Playwright booking-flow automation and availability parsing
-  notifier.ts    Discord webhook sender
+  booking.ts     drives a real purchase to checkout; pressBetala is the only Betala click
+  purchase.ts    Discord approval bot -- the only caller of pressBetala
+  recon.ts       records a hand-driven run of the site (npm run recon)
+  notifier.ts    Discord webhook sender (plain notifications, no buttons)
   db.ts          SQLite storage for watches
   types.ts       shared types, route/vehicle/lounge tables
 public/          the local web UI (plain HTML/CSS/JS, no build step)

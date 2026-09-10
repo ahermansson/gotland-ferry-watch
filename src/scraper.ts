@@ -14,14 +14,14 @@ import {
   type WatchStatus,
 } from "./types.js";
 
-const BASE_URL = "https://www.destinationgotland.se/";
+export const BASE_URL = "https://www.destinationgotland.se/";
 const DEBUG_DIR = path.resolve("debug");
 const STATE_FILE = path.resolve("data", "consent-state.json");
 
 /** Booking widget control ids, verified against the live site. */
 const BTN_ROUTE = "#booking-widget-transport-button-11";
 const BTN_DATE = "#booking-widget-transport-button-9";
-const BTN_DATE_RETURN = "#booking-widget-transport-button-10";
+export const BTN_DATE_RETURN = "#booking-widget-transport-button-10";
 const BTN_PASSENGERS = "#booking-widget-transport-button-1";
 const BTN_VEHICLE = "#booking-widget-transport-button-13";
 const OVERLAY = ".BookingWidgetOverlayContent";
@@ -55,7 +55,7 @@ const CONSENT_COOKIE = /^CookieInformation/i;
  * came back on every later run: the site then reads as that account, with its prices, and
  * anything booked would land on it. The stored state has to carry consent and nothing else.
  */
-async function dismissConsent(page: Page, ctx: BrowserContext): Promise<void> {
+export async function dismissConsent(page: Page, ctx: BrowserContext): Promise<void> {
   const decline = page.locator("#declineButton");
   try {
     await decline.waitFor({ state: "visible", timeout: 8000 });
@@ -70,7 +70,7 @@ async function dismissConsent(page: Page, ctx: BrowserContext): Promise<void> {
   fs.writeFileSync(STATE_FILE, JSON.stringify({ cookies, origins: [] }, null, 2));
 }
 
-function loadConsentState(): string | undefined {
+export function loadConsentState(): string | undefined {
   return fs.existsSync(STATE_FILE) ? STATE_FILE : undefined;
 }
 
@@ -95,7 +95,7 @@ function dayTimestamp(isoDate: string): number {
  * The widget opens on "Tur och retur", so a one-way search is the one that has to click.
  * A return watch leaves it alone and fills the second date instead.
  */
-async function setTripType(page: Page, roundTrip: boolean): Promise<void> {
+export async function setTripType(page: Page, roundTrip: boolean): Promise<void> {
   const checkbox = page.locator("input[type=checkbox]").first();
   if ((await checkbox.isChecked()) !== roundTrip) {
     await page.getByText("Tur och retur", { exact: true }).first().click();
@@ -103,7 +103,7 @@ async function setTripType(page: Page, roundTrip: boolean): Promise<void> {
   }
 }
 
-async function setRoute(page: Page, route: string): Promise<void> {
+export async function setRoute(page: Page, route: string): Promise<void> {
   const [origin, destination] = route.split("-");
   await page.locator(BTN_ROUTE).click();
   const overlay = page.locator(OVERLAY);
@@ -113,7 +113,7 @@ async function setRoute(page: Page, route: string): Promise<void> {
   await page.waitForTimeout(1200);
 }
 
-async function setDate(page: Page, isoDate: string, button = BTN_DATE): Promise<void> {
+export async function setDate(page: Page, isoDate: string, button = BTN_DATE): Promise<void> {
   const target = dayTimestamp(isoDate);
   const overlay = page.locator(OVERLAY);
   // Picking the outbound date of a return trip can leave the picker open on the return
@@ -143,7 +143,7 @@ async function setDate(page: Page, isoDate: string, button = BTN_DATE): Promise<
 }
 
 /** Rows are in a fixed order; adults ("Vuxen 26+ år") is the first. */
-async function setPassengers(page: Page, adults: number): Promise<void> {
+export async function setPassengers(page: Page, adults: number): Promise<void> {
   await page.locator(BTN_PASSENGERS).click();
   const overlay = page.locator(OVERLAY);
   await overlay.waitFor({ state: "visible", timeout: 15_000 });
@@ -165,7 +165,7 @@ async function setPassengers(page: Page, adults: number): Promise<void> {
   await page.waitForTimeout(1000);
 }
 
-async function setVehicle(page: Page, vehicle: keyof typeof VEHICLE_LABELS): Promise<void> {
+export async function setVehicle(page: Page, vehicle: keyof typeof VEHICLE_LABELS): Promise<void> {
   if (vehicle === "none") return; // widget defaults to no vehicle
   await page.locator(BTN_VEHICLE).click();
   const overlay = page.locator(OVERLAY);
@@ -192,7 +192,7 @@ async function setVehicle(page: Page, vehicle: keyof typeof VEHICLE_LABELS): Pro
  * Everything after that marker belongs to the return. Without this a watch on 07:15 out
  * would happily match a 07:15 sailing coming back.
  */
-async function tagFareButtons(page: Page): Promise<{ departure: string; arrival: string | null; fare: string; price: string | null; soldOut: boolean; key: string; leg: TripLeg }[]> {
+export async function tagFareButtons(page: Page): Promise<{ departure: string; arrival: string | null; fare: string; price: string | null; soldOut: boolean; key: string; leg: TripLeg }[]> {
   return page.evaluate(() => {
     const marker = Array.from(document.querySelectorAll("*")).find(
       (el) => el.children.length === 0 && /^Välj returresa$/i.test((el.textContent || "").trim())
@@ -232,6 +232,44 @@ async function tagFareButtons(page: Page): Promise<{ departure: string; arrival:
     }
     return out;
   });
+}
+
+/**
+ * Clicks the radio for one named lounge under an already-expanded fare. Walks the same row
+ * and per-radio label text as readSalongs, so "the lounge readSalongs reported" and "the
+ * lounge this clicks" can never disagree about which radio a name refers to.
+ */
+export async function selectSalong(page: Page, fareKey: string, salongName: string): Promise<boolean> {
+  return page.evaluate(
+    ({ key, salong }) => {
+      const btn = document.querySelector(`[data-fw-fare="${key}"]`);
+      if (!btn) return false;
+      let row: HTMLElement | null = btn as HTMLElement;
+      for (let i = 0; i < 8 && row; i++, row = row.parentElement) {
+        if (row.querySelector("input[type=radio]")) break;
+      }
+      if (!row) return false;
+      for (const radio of Array.from(row.querySelectorAll("input[type=radio]"))) {
+        let cell: HTMLElement | null = radio as HTMLElement;
+        for (let i = 0; i < 6 && cell; i++, cell = cell.parentElement) {
+          const t = (cell.innerText || "").replace(/\s+/g, " ").trim();
+          if (t && /[A-Za-zÅÄÖåäö]/.test(t) && t.length < 60) {
+            const name = t
+              .replace(/\s*\d[\d\s]*:-\s*$/, "")
+              .replace(/\s*Slutsålt\s*$/i, "")
+              .trim();
+            if (name === salong) {
+              (radio as HTMLElement).click();
+              return true;
+            }
+            break;
+          }
+        }
+      }
+      return false;
+    },
+    { key: fareKey, salong: salongName }
+  );
 }
 
 /** Reads the lounge rows that appear under a departure once a fare is expanded. */
@@ -306,7 +344,7 @@ export function isBookable(offer: DepartureOffer): boolean {
  * offer when the departure isn't on the page — the times that were found are the useful
  * part of that answer, since it usually means a mistyped departure.
  */
-async function readLeg(
+export async function readLeg(
   page: Page,
   departureTime: string,
   leg: TripLeg

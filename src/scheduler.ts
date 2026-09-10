@@ -8,6 +8,7 @@ import {
   setActive,
 } from "./db.js";
 import { sendDiscordNotification } from "./notifier.js";
+import { requestBookingApproval } from "./purchase.js";
 import { checkAvailability, isBookable } from "./scraper.js";
 import { VEHICLE_LABELS, type CheckResult, type TripLeg, type Watch } from "./types.js";
 
@@ -40,12 +41,23 @@ export async function runSingleCheck(watchId: string): Promise<CheckResult | und
 
   // The notification stays outside the lock — a slow webhook shouldn't hold up a check.
   const result = await withCheckLock(() => checkAvailability(watch));
+  recordCheckResult(watch.id, result.status, result.detail);
+
+  if (result.status === "available" && watch.booking.autoBook) {
+    const approval = await requestBookingApproval(watch);
+    if (approval.requested) {
+      console.log(`  ${watch.label}: booking approval requested (${approval.detail}).`);
+      return result;
+    }
+    // Auto-booking wanted this but couldn't get there (bot down, Reskort not offered,
+    // over budget, ...) -- fall through to the plain notification so it isn't silent.
+    console.warn(`  ${watch.label}: auto-booking did not run (${approval.detail}) -- notifying instead.`);
+  }
+
   // What decides this is whether a notification has landed, not how the status moved. A
   // failed webhook leaves the watch available and still searching, and keying off the
   // transition would then skip every later check — the status never changes again.
   const shouldNotify = result.status === "available" && !watch.notifiedAt;
-
-  recordCheckResult(watch.id, result.status, result.detail);
 
   if (shouldNotify) {
     const delivered = await sendDiscordNotification(

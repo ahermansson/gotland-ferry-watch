@@ -1,4 +1,5 @@
 import "dotenv/config";
+import { startApprovalBot } from "./purchase.js";
 import { createServer } from "./server.js";
 import { startScheduler } from "./scheduler.js";
 
@@ -10,3 +11,4 @@ app.listen(port, () => {
 });
 
 startScheduler();
+void startApprovalBot();
