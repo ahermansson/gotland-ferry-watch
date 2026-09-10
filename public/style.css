@@ -24,6 +24,57 @@ h1 {
   margin-top: 0;
 }
 
+.page-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.page-header .icon-btn {
+  width: 2.4rem;
+  height: 2.4rem;
+  flex: none;
+}
+
+.page-header .icon-btn svg {
+  width: 1.3rem;
+  height: 1.3rem;
+}
+
+#new-watch-button {
+  display: block;
+  margin: 0 0 1.5rem;
+}
+
+dialog {
+  border: none;
+  border-radius: 12px;
+  padding: 1.5rem;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.2);
+  max-width: 32rem;
+  width: calc(100% - 2rem);
+}
+
+dialog::backdrop {
+  background: rgba(0, 0, 0, 0.35);
+}
+
+dialog h2 {
+  margin-top: 0;
+}
+
+dialog form {
+  margin: 0;
+}
+
+.dialog-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
 .card {
   background: #fff;
   border-radius: 12px;
@@ -161,10 +212,39 @@ td.actions {
   margin: 0;
 }
 
-.status-available { color: #1a7f37; font-weight: 600; }
-.status-partial { color: #a15c00; font-weight: 600; }
-.status-full { color: #b3261e; }
-.status-unknown { color: #888; }
+/* A shape rather than just a colour: square = nothing to book, dot = something changed --
+   so the status still reads on its own for someone who can't tell red from green. */
+.status-dot {
+  display: inline-block;
+  width: 0.85rem;
+  height: 0.85rem;
+  cursor: default;
+}
+
+.status-unknown,
+.status-full {
+  border-radius: 2px;
+  background: #b3261e;
+}
+
+.status-unknown {
+  background: #9aa0a6;
+}
+
+.status-partial {
+  border-radius: 2px;
+  background: #c9820a;
+}
+
+.status-available {
+  border-radius: 50%;
+  background: #1a7f37;
+}
+
+.status-booked {
+  border-radius: 50%;
+  background: #1a56b3;
+}
 
 .hint {
   font-size: 0.8rem;
@@ -178,10 +258,8 @@ td.actions {
   margin-left: 0.75rem;
 }
 
-td.detail {
-  font-size: 0.8rem;
-  line-height: 1.45;
-  max-width: 22rem;
+.error.ok {
+  color: #1e7d32;
 }
 
 td small { color: #666; }
@@ -264,6 +342,28 @@ td small { color: #666; }
 
 .countdown-card .hint {
   margin: 0.6rem 0 0;
+}
+
+.countdown-progress {
+  position: relative;
+  width: 100%;
+  height: 5px;
+  margin: 0.6rem 0 0;
+  background: #e5e5e5;
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+/* Centred and shrunk from both edges at once, rather than anchored to one end. */
+.countdown-progress-fill {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  height: 100%;
+  width: 100%;
+  background: #f5a623;
+  transform: translateX(-50%);
+  transition: width 1s linear;
 }
 
 /* --- Booking settings, shown in the add form and per watch --------------------------- */
@@ -376,4 +476,70 @@ td small { color: #666; }
   display: flex;
   align-items: center;
   gap: 0.5rem;
+}
+
+/* Always-visible row between a watch and its (hidden until edited) settings panel. */
+.auto-summary-row > td {
+  padding: 0.35rem 0.5rem;
+  border-top: none;
+}
+
+.auto-summary {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  font-size: 0.85rem;
+  color: #444;
+}
+
+.auto-summary-text {
+  overflow-wrap: anywhere;
+}
+
+.toggle {
+  position: relative;
+  display: inline-block;
+  flex: none;
+  width: 36px;
+  height: 20px;
+}
+
+.toggle input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.toggle-track {
+  position: absolute;
+  inset: 0;
+  background: #c6cbd1;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.toggle-track::before {
+  content: "";
+  position: absolute;
+  left: 3px;
+  top: 3px;
+  width: 14px;
+  height: 14px;
+  background: #fff;
+  border-radius: 50%;
+  transition: transform 0.15s ease;
+}
+
+.toggle input:checked + .toggle-track {
+  background: #2e7d32;
+}
+
+.toggle input:checked + .toggle-track::before {
+  transform: translateX(16px);
+}
+
+.toggle input:focus-visible + .toggle-track {
+  outline: 2px solid #2e7d32;
+  outline-offset: 2px;
 }

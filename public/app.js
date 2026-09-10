@@ -6,6 +6,19 @@ const settingsError = document.querySelector("#settings-error");
 const settingsStatus = document.querySelector("#settings-status");
 const countdownEl = document.querySelector("#countdown");
 const countdownLabel = document.querySelector("#countdown-label");
+const countdownProgressFill = document.querySelector("#countdown-progress-fill");
+const newWatchDialog = document.querySelector("#new-watch-dialog");
+const settingsDialog = document.querySelector("#settings-dialog");
+
+document.querySelector("#new-watch-button").addEventListener("click", () => newWatchDialog.showModal());
+document.querySelector("#settings-button").addEventListener("click", () => settingsDialog.showModal());
+document.querySelectorAll('[data-action="close-dialog"]').forEach((btn) =>
+  btn.addEventListener("click", () => btn.closest("dialog").close())
+);
+
+/** Blank slate for the next open — Avbryt and Esc both fire a dialog's "close" event, so
+ * leftover input from an abandoned add doesn't greet the next person to open it. */
+newWatchDialog.addEventListener("close", () => resetAddForm());
 
 let vehicleLabels = {};
 let fareClasses = [];
@@ -135,20 +148,22 @@ async function loadWatches() {
   tbody.innerHTML = "";
   for (const w of watches) {
     const tr = document.createElement("tr");
-    const lastChecked = w.lastCheckedAt ? new Date(w.lastCheckedAt).toLocaleString("sv-SE") : "–";
+    const lastChecked = w.lastCheckedAt ? clockTime(w.lastCheckedAt) : "–";
     const back = w.returnTime
       ? `<br /><small>retur ${escapeHtml(w.returnDate)} kl ${escapeHtml(w.returnTime)}</small>`
       : "";
     const trip = `${w.route.replace("-", " → ")}<br /><small>${escapeHtml(w.date)} kl ${escapeHtml(w.departureTime)} · ${w.adults} vuxna · ${escapeHtml(vehicleLabels[w.vehicle] ?? w.vehicle)}</small>${back}`;
 
     tr.innerHTML = `
-      <td>${escapeHtml(w.label)}</td>
+      <td>
+        <label class="toggle">
+          <input type="checkbox" data-action="toggle" data-id="${w.id}" ${w.active ? "checked" : ""} />
+          <span class="toggle-track"></span>
+        </label>
+      </td>
       <td>${trip}</td>
-      <td class="status-${w.lastStatus}">${statusLabel(w.lastStatus)}</td>
-      <td class="detail">${formatDetail(w.lastDetail)}</td>
+      <td>${statusIndicator(w.lastStatus, w.lastDetail)}</td>
       <td>${escapeHtml(lastChecked)}</td>
-      <td><input type="checkbox" data-action="toggle" data-id="${w.id}" ${w.active ? "checked" : ""} /></td>
-      <td><input type="checkbox" data-action="auto" data-id="${w.id}" ${w.booking?.autoBook ? "checked" : ""} title="Autoboka" /></td>
       <td class="actions">
         ${iconButton({
           action: "check",
@@ -163,13 +178,28 @@ async function loadWatches() {
     `;
     tbody.appendChild(tr);
 
+    // Always visible, unlike the editable panel below it — this is what makes an
+    // auto-booked watch's settings show up on the row itself, not just after a click.
+    const summary = document.createElement("tr");
+    summary.className = "auto-summary-row";
+    summary.innerHTML = `<td colspan="5">
+      <div class="auto-summary">
+        <label class="toggle">
+          <input type="checkbox" data-action="auto" data-id="${w.id}" ${w.booking?.autoBook ? "checked" : ""} />
+          <span class="toggle-track"></span>
+        </label>
+        <span class="auto-summary-text">${describeBookingPrefs(w.booking)}</span>
+      </div>
+    </td>`;
+    tbody.appendChild(summary);
+
     // Kept in the DOM but hidden, so opening the panel costs no round trip and the
     // 15 s redraw can restore whatever was open.
     const panel = document.createElement("tr");
     panel.className = "prefs-row";
     panel.dataset.prefsFor = w.id;
     panel.hidden = !openPrefs.has(w.id);
-    panel.innerHTML = `<td colspan="8">${renderBookingPrefs(w.booking)}
+    panel.innerHTML = `<td colspan="5">${renderBookingPrefs(w.booking)}
       <div class="prefs-actions">
         <button type="button" data-action="save-prefs" data-id="${w.id}">Spara</button>
         <span class="error" data-prefs-error="${w.id}"></span>
@@ -188,16 +218,29 @@ function iconButton({ action, id, icon, label, busy = false, danger = false }) {
 }
 
 /**
- * The detail is written for Discord, where **stars** mean bold. Escape it first, then let
- * that one bit of markup through — otherwise the table shows the asterisks.
+ * A coloured shape instead of a status column full of text — red square: nothing to book,
+ * amber square: half a return trip is open, green dot: book it, blue dot: already booked.
+ * The full detail (which lounge, why it failed, ...) survives as the title tooltip rather
+ * than disappearing — it's just not taking up a column of its own any more.
  */
-function formatDetail(detail) {
-  return escapeHtml(detail ?? "–")
-    .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
-    .replace(/\n/g, "<br />");
+function statusIndicator(status, detail) {
+  const title = `${statusLabel(status)}${detail ? ` — ${detail.replace(/\*\*/g, "")}` : ""}`;
+  return `<span class="status-dot status-${status}" title="${escapeHtml(title)}" aria-label="${escapeHtml(title)}"></span>`;
+}
+
+/** The one-line summary shown on every watch row, so auto-booking settings don't hide
+ * behind a click. Off gets a plain "av" — nothing configured is worth summarizing then. */
+function describeBookingPrefs(booking) {
+  if (!booking?.autoBook) return "Autoboka: av";
+  const fares = booking.fareOrder?.length ? booking.fareOrder.join(" → ") : "ingen biljettklass vald";
+  const salongs = booking.salongs?.length ? booking.salongs.join(", ") : "ingen salong vald";
+  const price = booking.maxPrice != null ? `max ${booking.maxPrice} kr` : "inget takpris";
+  const seat = booking.seatReservation ? " · + platsreservation" : "";
+  return `🤖 Auto: ${escapeHtml(fares)} · ${escapeHtml(salongs)} · ${escapeHtml(price)}${escapeHtml(seat)}`;
 }
 
 function statusLabel(status) {
+  if (status === "booked") return "Bokad";
   if (status === "available") return "Ledig plats!";
   // Only a return watch can land here: one leg open, the other not.
   if (status === "partial") return "Halv träff";
@@ -245,6 +288,18 @@ autoBookBox.addEventListener("change", () => {
   bookingBlock.hidden = !autoBookBox.checked;
 });
 
+/** Back to a blank add-form -- used after a successful add and on every dialog close
+ * (Avbryt, Esc, backdrop), so an abandoned attempt never lingers for the next open. */
+function resetAddForm() {
+  form.reset();
+  formError.textContent = "";
+  returnFields.hidden = true;
+  bookingBlock.hidden = true;
+  bookingBlock.innerHTML = renderBookingPrefs(null);
+  document.querySelector("#route-select").value = "Visby-Nynäshamn";
+  document.querySelector("#vehicle-select").value = "car-under-225";
+}
+
 form.addEventListener("submit", async (e) => {
   e.preventDefault();
   formError.textContent = "";
@@ -262,12 +317,7 @@ form.addEventListener("submit", async (e) => {
       const body = await res.json().catch(() => ({}));
       throw new Error(body.error ?? `HTTP ${res.status}`);
     }
-    form.reset();
-    returnFields.hidden = true;
-    bookingBlock.hidden = true;
-    bookingBlock.innerHTML = renderBookingPrefs(null);
-    document.querySelector("#route-select").value = "Visby-Nynäshamn";
-    document.querySelector("#vehicle-select").value = "car-under-225";
+    newWatchDialog.close(); // triggers the "close" listener above, which resets the form
     await loadWatches();
     await loadSettings({ fillInputs: false });
   } catch (err) {
@@ -293,20 +343,30 @@ tbody.addEventListener("click", async (e) => {
   } else if (action === "save-prefs") {
     const panel = tbody.querySelector(`[data-prefs-for="${id}"]`);
     const errorEl = panel.querySelector(`[data-prefs-error="${id}"]`);
-    const autoBook = tbody.querySelector(`input[data-action="auto"][data-id="${id}"]`).checked;
+    const autoBox = tbody.querySelector(`input[data-action="auto"][data-id="${id}"]`);
     errorEl.textContent = "";
+    errorEl.classList.remove("ok");
     const res = await fetch(`/api/watches/${id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ booking: readBookingPrefs(panel, autoBook) }),
+      body: JSON.stringify({ booking: readBookingPrefs(panel, autoBox.checked) }),
     });
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
       errorEl.textContent = body.error ?? `HTTP ${res.status}`;
+      // Nothing was saved, so a checked Auto box would be showing an intent that failed.
+      if (autoBox.checked) autoBox.checked = false;
       return;
     }
-    openPrefs.delete(id);
+    // Left open on purpose: you just set this, and closing it here would fold the panel
+    // away before you've had a chance to see what got saved.
     await loadWatches();
+    const freshError = tbody.querySelector(`[data-prefs-error="${id}"]`);
+    if (freshError) {
+      freshError.textContent = "Sparat.";
+      freshError.classList.add("ok");
+      setTimeout(() => freshError.classList.remove("ok"), 2000);
+    }
   } else if (action === "check") {
     checking.add(id);
     await loadWatches();
@@ -327,19 +387,28 @@ tbody.addEventListener("change", async (e) => {
   const auto = e.target.closest("input[data-action='auto']");
   if (auto) {
     const panel = tbody.querySelector(`[data-prefs-for="${auto.dataset.id}"]`);
+
+    // Turning it on needs a price cap and at least one fare/lounge first, which an
+    // untouched panel won't have — open it for editing instead of firing off a save
+    // that's only going to be refused. "Spara" in the panel is what actually turns it on.
+    if (auto.checked) {
+      panel.hidden = false;
+      openPrefs.add(auto.dataset.id);
+      // Left checked: it shows intent, and "Spara" below reads this same checkbox to
+      // decide what to save. Nothing is actually persisted until that click succeeds.
+      return;
+    }
+
     const res = await fetch(`/api/watches/${auto.dataset.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ booking: readBookingPrefs(panel, auto.checked) }),
+      body: JSON.stringify({ booking: readBookingPrefs(panel, false) }),
     });
-    // Switching it on without a price cap is refused by the server, so open the panel and
-    // say why rather than leaving a switch that looks on but was never saved.
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
       panel.hidden = false;
       openPrefs.add(auto.dataset.id);
       panel.querySelector(`[data-prefs-error="${auto.dataset.id}"]`).textContent = body.error ?? `HTTP ${res.status}`;
-      auto.checked = false;
     }
     return;
   }
@@ -360,6 +429,9 @@ const SETTING_KEYS = ["intervalMinutes", "jitterMinutes", "activeFrom", "activeT
 /** Last payload from /api/settings, so the countdown can tick between polls. */
 let schedulerState = null;
 let lastDueRefresh = 0;
+/** The span the progress bar is draining across, captured the moment a given nextCheckAt
+ * is first seen -- there's no cycle-start timestamp from the server to measure it from. */
+let countdownSpan = { for: null, totalMs: 0 };
 
 function formatRemaining(ms) {
   const total = Math.max(0, Math.round(ms / 1000));
@@ -383,15 +455,21 @@ function renderCountdown() {
     countdownEl.textContent = value;
     countdownEl.className = `countdown${tone ? ` ${tone}` : ""}`;
   };
+  // The bar only means something while an actual countdown is running below it -- every
+  // other state (idle, checking, paused) leaves it full rather than at some stale fraction.
+  const showFull = (label, value, tone) => {
+    show(label, value, tone);
+    countdownProgressFill.style.width = "100%";
+  };
 
-  if (!state) return show("Nästa cykel", "–", "idle");
-  if (state.checking) return show("Pågår nu", "Kollar…", "idle");
+  if (!state) return showFull("Nästa cykel", "–", "idle");
+  if (state.checking) return showFull("Pågår nu", "Kollar…", "idle");
   // Nothing is being watched, so there is no cycle to count down to. Say that rather than
   // showing a clock that runs out and does nothing.
-  if (state.idle) return show("", "Ingen aktiv bevakning", "idle text");
-  if (!state.nextCheckAt) return show("Nästa cykel", "–", "idle");
+  if (state.idle) return showFull("", "Ingen aktiv bevakning", "idle text");
+  if (!state.nextCheckAt) return showFull("Nästa cykel", "–", "idle");
   // Outside the window the wait is hours, which is a clock time, not a countdown.
-  if (state.paused) return show("Nästa cykel startar", clockTime(state.nextCheckAt), "paused");
+  if (state.paused) return showFull("Nästa cykel startar", clockTime(state.nextCheckAt), "paused");
 
   const remaining = new Date(state.nextCheckAt) - Date.now();
   if (remaining <= 0) {
@@ -400,9 +478,22 @@ function renderCountdown() {
       lastDueRefresh = Date.now();
       loadSettings({ fillInputs: false });
     }
-    return show("Pågår nu", "Kollar…", "idle");
+    return showFull("Pågår nu", "Kollar…", "idle");
   }
   show("Nästa cykel startar om", formatRemaining(remaining));
+  renderCountdownProgress(state.nextCheckAt, remaining);
+}
+
+/**
+ * Full right after a cycle and empty by the next one. There's no cycle-start time from the
+ * server to measure against, so the span is captured the first moment a given nextCheckAt
+ * is seen -- whatever "remaining" was then becomes "total", and the fraction drains from
+ * there as the seconds tick down to that same nextCheckAt.
+ */
+function renderCountdownProgress(nextCheckAt, remaining) {
+  if (countdownSpan.for !== nextCheckAt) countdownSpan = { for: nextCheckAt, totalMs: remaining };
+  const fraction = countdownSpan.totalMs > 0 ? Math.min(1, Math.max(0, remaining / countdownSpan.totalMs)) : 0;
+  countdownProgressFill.style.width = `${fraction * 100}%`;
 }
 
 function renderSettings(settings, { fillInputs }) {
@@ -470,6 +561,7 @@ settingsForm.addEventListener("submit", async (e) => {
     const body = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(body.error ?? `HTTP ${res.status}`);
     renderSettings(body, { fillInputs: true });
+    settingsDialog.close();
   } catch (err) {
     settingsError.textContent = err.message;
   }

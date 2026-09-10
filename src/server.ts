@@ -147,7 +147,6 @@ export function createServer() {
     const body = req.body as Partial<NewWatchInput>;
     const errors: string[] = [];
 
-    if (!body.label?.trim()) errors.push("label krävs");
     if (!body.route || !ROUTES.includes(body.route as Route)) errors.push("okänd route");
     if (!body.date || !DATE_RE.test(body.date)) errors.push("date måste vara YYYY-MM-DD");
     if (!body.departureTime || !TIME_RE.test(body.departureTime))
@@ -178,8 +177,13 @@ export function createServer() {
       return;
     }
 
+    // The route and time already say what's being watched, so typing a name is one less
+    // thing to do -- label only exists to give Discord messages and server logs something
+    // to call this watch by, and a route+date+time string does that just as well.
+    const label = body.label?.trim() || `${(body.route as Route).replace("-", " → ")} ${body.date} ${body.departureTime}`;
+
     const watch = createWatch({
-      label: body.label!.trim(),
+      label,
       route: body.route as Route,
       date: body.date!,
       departureTime: body.departureTime!,

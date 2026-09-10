@@ -7,21 +7,44 @@
 </head>
 <body>
   <main>
-    <h1>Gotland Ferry Watch</h1>
-    <p class="subtitle">Bevakar en specifik avgång hos Destination Gotland och pingar Discord när en salong blir ledig.</p>
+    <header class="page-header">
+      <div>
+        <h1>Gotland Ferry Watch</h1>
+        <p class="subtitle">Bevakar en specifik avgång hos Destination Gotland och pingar Discord när en salong blir ledig.</p>
+      </div>
+      <button type="button" id="settings-button" class="icon-btn" title="Kontrollintervall" aria-label="Kontrollintervall">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" /></svg>
+      </button>
+    </header>
 
     <section class="card countdown-card">
       <p class="countdown-label" id="countdown-label">Nästa koll om</p>
       <p class="countdown" id="countdown">–</p>
+      <div class="countdown-progress"><div class="countdown-progress-fill" id="countdown-progress-fill"></div></div>
       <p class="hint" id="settings-status">Laddar…</p>
     </section>
 
     <section class="card">
-      <h2>Lägg till bevakning</h2>
+      <h2>Bevakade avgångar</h2>
+      <table id="watch-table">
+        <thead>
+          <tr>
+            <th>Aktiv</th>
+            <th>Resa</th>
+            <th>Status</th>
+            <th>Senast kollad</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </section>
+
+    <button type="button" id="new-watch-button">+ Ny bevakning</button>
+
+    <dialog id="new-watch-dialog">
       <form id="add-form">
-        <label>Namn
-          <input name="label" placeholder="t.ex. Söndag hem" required />
-        </label>
+        <h2>Ny bevakning</h2>
         <div class="row">
           <label>Resväg
             <select name="route" id="route-select" required></select>
@@ -63,33 +86,17 @@
         </label>
         <div id="booking-block" hidden></div>
         <p class="hint">Avgångstiden måste matcha sajtens tabell exakt, t.ex. <code>07:15</code>.</p>
-        <button type="submit">Lägg till</button>
+        <div class="dialog-actions">
+          <button type="submit">Lägg till</button>
+          <button type="button" class="secondary" data-action="close-dialog">Avbryt</button>
+        </div>
         <span id="form-error" class="error"></span>
       </form>
-    </section>
+    </dialog>
 
-    <section class="card">
-      <h2>Bevakade avgångar</h2>
-      <table id="watch-table">
-        <thead>
-          <tr>
-            <th>Namn</th>
-            <th>Resa</th>
-            <th>Status</th>
-            <th>Lediga biljetter</th>
-            <th>Senast kollad</th>
-            <th>Aktiv</th>
-            <th>Auto</th>
-            <th></th>
-          </tr>
-        </thead>
-        <tbody></tbody>
-      </table>
-    </section>
-
-    <section class="card">
-      <h2>Kontrollintervall</h2>
+    <dialog id="settings-dialog">
       <form id="settings-form">
+        <h2>Kontrollintervall</h2>
         <div class="row">
           <label>Minuter mellan koll
             <div class="stepper">
@@ -122,10 +129,13 @@
         <p class="hint">Tidsfönstret gäller svensk tid. Sluttid före starttid betyder ett fönster
           över midnatt, och samma tid i båda fälten stänger av fönstret helt — då kollas det
           dygnet runt. <strong>Kolla nu</strong> fungerar alltid, även utanför fönstret.</p>
-        <button type="submit">Spara</button>
+        <div class="dialog-actions">
+          <button type="submit">Spara</button>
+          <button type="button" class="secondary" data-action="close-dialog">Stäng</button>
+        </div>
         <span id="settings-error" class="error"></span>
       </form>
-    </section>
+    </dialog>
   </main>
   <script src="/app.js"></script>
 </body>
