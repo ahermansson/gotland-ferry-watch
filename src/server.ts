@@ -32,12 +32,17 @@ const TIME_RE = /^\d{2}:\d{2}$/;
 const CLOCK_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
 
 /**
- * Reads the booking settings off a request. Everything is checked against the known fare
- * classes and lounges rather than trusted: these values end up driving a purchase, and a
- * typo that silently widened what may be bought is exactly the wrong kind of bug.
+ * Reads a watch's fare classes and lounges, and — when it auto-books — its price cap.
  *
- * A price cap is required once auto-booking is on. It can be set as high as you like, but
- * it cannot be absent — it is the one limit that holds when everything else misreads.
+ * The fare classes and the lounges belong to the WATCH, not to auto-booking: they say what
+ * counts as a hit, and a watch that matches anything is a watch that wakes you for a
+ * Djursalong you would never take. Both are therefore required of every watch, armed or
+ * not. Everything is checked against the known values rather than trusted: these end up
+ * both deciding a notification and driving a purchase.
+ *
+ * Auto-booking adds exactly two things: a price cap, which is required once it is on —
+ * it can be as high as you like but it cannot be absent, being the one limit that holds
+ * when everything else misreads — and whether to buy the seat reservation.
  */
 function parseBookingPrefs(input: unknown, errors: string[]): BookingPrefs {
   const body = (input ?? {}) as Partial<Record<keyof BookingPrefs, unknown>>;
@@ -70,11 +75,9 @@ function parseBookingPrefs(input: unknown, errors: string[]): BookingPrefs {
 
   if (body.seatReservation !== undefined) prefs.seatReservation = body.seatReservation === true;
 
-  if (prefs.autoBook) {
-    if (prefs.fareOrder.length === 0) errors.push("autobokning kräver minst en biljettklass");
-    if (prefs.salongs.length === 0) errors.push("autobokning kräver minst en salong");
-    if (prefs.maxPrice === null) errors.push("autobokning kräver ett takpris");
-  }
+  if (prefs.fareOrder.length === 0) errors.push("välj minst en biljettklass att bevaka");
+  if (prefs.salongs.length === 0) errors.push("välj minst en salong att bevaka");
+  if (prefs.autoBook && prefs.maxPrice === null) errors.push("autobokning kräver ett takpris");
 
   return prefs;
 }

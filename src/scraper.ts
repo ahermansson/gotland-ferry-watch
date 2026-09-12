@@ -5,6 +5,7 @@ import {
   SALONG_TIERS,
   TIER_ORDER,
   VEHICLE_LABELS,
+  type BookingPrefs,
   type CheckResult,
   type DepartureOffer,
   type FareOffer,
@@ -333,9 +334,42 @@ async function dumpDebug(watchId: string, page: Page, note: string): Promise<{ s
   return { screenshotPath, textDumpPath };
 }
 
-/** A leg is bookable when any fare still has any lounge that isn't sold out. */
-export function isBookable(offer: DepartureOffer): boolean {
-  return offer.fares.some((f) => !f.soldOut && f.salongs.some((s) => !s.soldOut));
+/**
+ * What the watch is looking for: the fare classes and lounges it was created with. They
+ * are not only what an auto-booking may buy -- they are the definition of a hit. A watch
+ * for Försalong is not answered by a free Barnsalong, and telling someone their departure
+ * opened up when the only thing free is a lounge they ruled out is a false alarm at 6am.
+ *
+ * `scope` is required rather than optional: both callers hold the watch, and a default of
+ * "anything" is exactly the silent widening this is here to stop.
+ */
+export type WatchScope = Pick<BookingPrefs, "fareOrder" | "salongs">;
+
+/**
+ * The scraper reads fare and lounge names off the page as plain strings, while the watch
+ * stores them as the narrower literal unions -- so the comparison widens rather than
+ * casting the page's text into a type nobody checked it against.
+ */
+const listed = (list: readonly string[], value: string): boolean => list.includes(value);
+
+/** A leg is bookable when a fare the watch asked for has a lounge the watch asked for. */
+export function isBookable(offer: DepartureOffer, scope: WatchScope): boolean {
+  return offer.fares.some(
+    (f) =>
+      !f.soldOut &&
+      listed(scope.fareOrder, f.fare) &&
+      f.salongs.some((s) => !s.soldOut && listed(scope.salongs, s.name))
+  );
+}
+
+/**
+ * Something is free, but not something this watch asked for. Worth one line in the detail:
+ * without it a watch reads "fullbokad" while the tooltip under it lists a bookable lounge,
+ * and the only way to tell why is to remember what you ticked when you created it.
+ */
+export function bookableOutsideScope(offer: DepartureOffer, scope: WatchScope): boolean {
+  const anyFree = offer.fares.some((f) => !f.soldOut && f.salongs.some((s) => !s.soldOut));
+  return anyFree && !isBookable(offer, scope);
 }
 
 /**
@@ -466,8 +500,9 @@ export async function checkAvailability(watch: Watch): Promise<CheckResult> {
     }
 
     const offer = outbound.offer;
-    const outBookable = isBookable(offer);
-    const backBookable = returnLeg ? isBookable(returnLeg) : true;
+    const scope = watch.booking;
+    const outBookable = isBookable(offer, scope);
+    const backBookable = returnLeg ? isBookable(returnLeg, scope) : true;
     // A return watch is only a hit when the whole trip can be booked; one leg on its own
     // is worth reporting but is not what the watch is waiting for.
     const status: WatchStatus = outBookable && backBookable
@@ -475,14 +510,20 @@ export async function checkAvailability(watch: Watch): Promise<CheckResult> {
       : roundTrip && (outBookable || backBookable)
         ? "partial"
         : "full";
-    const bookable = status === "available";
+    // Free, but not what was asked for. Said once for the whole trip: which leg it was is
+    // already legible from the lounges listed above it.
+    const outsideOnly =
+      status !== "available" &&
+      (bookableOutsideScope(offer, scope) || (returnLeg ? bookableOutsideScope(returnLeg, scope) : false));
 
     let extra: { screenshotPath?: string; textDumpPath?: string } = {};
     if (debugAlways) extra = await dumpDebug(watch.id, page, `status=${status}`);
 
     return {
       status,
-      detail: describeTrip(watch, offer, returnLeg),
+      detail:
+        describeTrip(watch, offer, returnLeg) +
+        (outsideOnly ? "\n\nℹ️ Det finns lediga platser, men inte i biljettklass/salong du bevakar." : ""),
       offer,
       returnOffer: returnLeg,
       ...extra,

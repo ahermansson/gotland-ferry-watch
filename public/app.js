@@ -31,6 +31,7 @@ const checking = new Set();
 // Inline so a row costs no extra request, and stroke-drawn so they take the button's own
 // colour on hover and when disabled.
 const ICON_RUN = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="23 4 23 10 17 10" /><polyline points="1 20 1 14 7 14" /><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" /></svg>`;
+const ICON_CHEVRON = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 18 15 12 9 6" /></svg>`;
 const ICON_DELETE = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /><line x1="10" y1="11" x2="10" y2="17" /><line x1="14" y1="11" x2="14" y2="17" /></svg>`;
 
 async function loadOptions() {
@@ -55,12 +56,12 @@ async function loadOptions() {
 }
 
 /**
- * The booking settings, rendered from the options the server reports rather than a copy
- * of them here — a lounge the server would reject must not be offerable in the form.
- * The same markup serves the add form and the per-watch panel, so the two cannot drift.
+ * What the watch is looking for: which fare classes and which lounges count as a hit.
+ * Rendered from the options the server reports rather than a copy of them here — a lounge
+ * the server would reject must not be offerable in the form.
  */
-function renderBookingPrefs(prefs) {
-  const p = prefs ?? bookingDefaults ?? { fareOrder: [], salongs: [], maxPrice: null, seatReservation: false };
+function renderWatchScope(prefs) {
+  const p = prefs ?? bookingDefaults ?? { fareOrder: [], salongs: [] };
   // Ranked: ticked classes in their saved order first, the rest after.
   const ranked = [...p.fareOrder, ...fareClasses.filter((f) => !p.fareOrder.includes(f))];
 
@@ -86,10 +87,21 @@ function renderBookingPrefs(prefs) {
 
   return `
     <div class="booking-prefs">
-      <p class="prefs-title">Biljettklass, bästa först</p>
+      <p class="prefs-title">Biljettklass att bevaka, bästa först</p>
       <ul class="rank">${fareRows}</ul>
-      <p class="prefs-title">Salonger som duger — den billigaste av dem bokas</p>
+      <p class="prefs-title">Salonger att bevaka — vid autobokning tas den billigaste av dem</p>
       <div class="chips">${salongBoxes}</div>
+    </div>`;
+}
+
+/**
+ * The buying half, and all that is left behind the Autoboka switch. Everything else about
+ * a watch describes what to look for; these two only matter once it may spend money.
+ */
+function renderAutoFields(prefs) {
+  const p = prefs ?? bookingDefaults ?? { maxPrice: null, seatReservation: false };
+  return `
+    <div class="booking-prefs">
       <div class="row">
         <label>Takpris för hela resan (kr)
           <input type="number" min="1" step="1" data-pref="maxPrice" value="${p.maxPrice ?? ""}" placeholder="t.ex. 6000" />
@@ -102,21 +114,23 @@ function renderBookingPrefs(prefs) {
     </div>`;
 }
 
-/** Reads back what renderBookingPrefs produced. `autoBook` comes from the caller's switch. */
-function readBookingPrefs(root, autoBook) {
-  const fareOrder = [...root.querySelectorAll(".rank li")]
+/** Reads both halves back. `autoBook` comes from the caller's switch. */
+function readBookingPrefs(scopeRoot, autoRoot, autoBook) {
+  const fareOrder = [...scopeRoot.querySelectorAll(".rank li")]
     .filter((li) => li.querySelector("[data-fare-on]").checked)
     .map((li) => li.dataset.fare);
-  const salongs = [...root.querySelectorAll("[data-salong]")]
+  const salongs = [...scopeRoot.querySelectorAll("[data-salong]")]
     .filter((box) => box.checked)
     .map((box) => box.dataset.salong);
-  const maxPrice = root.querySelector('[data-pref="maxPrice"]').value;
+  const maxPrice = autoRoot.querySelector('[data-pref="maxPrice"]').value;
   return {
     autoBook,
     fareOrder,
     salongs,
+    // Sent whatever the switch says: the server ignores them when it is off, and keeping
+    // them means ticking the switch back on does not silently arrive with an empty cap.
     maxPrice: maxPrice === "" ? null : Number(maxPrice),
-    seatReservation: root.querySelector('[data-pref="seatReservation"]').checked,
+    seatReservation: autoRoot.querySelector('[data-pref="seatReservation"]').checked,
   };
 }
 
@@ -168,55 +182,94 @@ function renderWatches(watches) {
 }
 
 /**
- * The two rows a watch owns: the watch itself, and -- only when it auto-books -- a line
- * saying so. There is no editor here. What a watch is allowed to buy is decided when it
- * is created and never again: an auto-booking that can be switched off from a table is
- * one that can be switched off by a mis-tap, and switching it off silently is the same
- * outcome as the bug this whole branch started with. Changed your mind: delete the watch
- * and add it again.
+ * The two rows a watch owns: the line you scan, and the detail behind its arrow.
+ *
+ * Collapsed, a row answers one question -- which trip, and when -- plus a robot when the
+ * watch may buy it and a dot for how it stands. Everything else about a watch is true but
+ * not worth a column: passengers, vehicle, what counts as a hit, what it may pay, what the
+ * last check actually said. That all lives one tap away, along with the controls, so the
+ * table reads as a list of departures rather than a form with rows.
  */
 function createWatchRows(w) {
   const tr = document.createElement("tr");
   tr.className = "watch-row";
   tr.dataset.watch = w.id;
   tr.innerHTML = `
-      <td>
-        <label class="toggle">
-          <input type="checkbox" data-action="toggle" data-id="${w.id}" />
-          <span class="toggle-track"></span>
-        </label>
+      <td class="expander">
+        <button type="button" class="icon-btn chevron" data-action="expand" data-id="${w.id}"
+          aria-expanded="false" aria-label="Visa mer om bevakningen">${ICON_CHEVRON}</button>
       </td>
       <td data-cell="trip"></td>
+      <td class="auto-mark" data-cell="auto"></td>
       <td data-cell="status"></td>
-      <td class="actions" data-cell="actions"></td>
     `;
   tbody.appendChild(tr);
 
-  const summary = document.createElement("tr");
-  summary.className = "auto-summary-row";
-  summary.dataset.watch = w.id;
-  summary.hidden = !w.booking?.autoBook;
-  summary.innerHTML = `<td colspan="4"><span class="auto-summary-text"></span></td>`;
-  tbody.appendChild(summary);
+  const detail = document.createElement("tr");
+  detail.className = "detail-row";
+  detail.dataset.watch = w.id;
+  detail.dataset.detailFor = w.id;
+  detail.hidden = true;
+  detail.innerHTML = `<td colspan="4">
+      <dl class="detail-grid" data-cell="facts"></dl>
+      <div class="detail-actions">
+        <label class="toggle" title="Aktiv">
+          <input type="checkbox" data-action="toggle" data-id="${w.id}" />
+          <span class="toggle-track"></span>
+        </label>
+        <span class="detail-active-label" data-cell="active-label"></span>
+        <span class="detail-buttons" data-cell="actions"></span>
+      </div>
+    </td>`;
+  tbody.appendChild(detail);
 }
 
-/** Everything on a watch's rows that the server decides. The panel is not in this list. */
+/** One label/value pair, skipped entirely when there is nothing to say. */
+function fact(label, value) {
+  return value ? `<dt>${escapeHtml(label)}</dt><dd>${value}</dd>` : "";
+}
+
+/** Everything on a watch's rows that the server decides. */
 function updateWatchRow(w) {
   const tr = tbody.querySelector(`tr.watch-row[data-watch="${w.id}"]`);
   if (!tr) return;
 
-  const activeBox = tr.querySelector('input[data-action="toggle"]');
-  if (activeBox.checked !== w.active) activeBox.checked = w.active;
-
+  const paused = w.active ? "" : ` <span class="chip-paused">Pausad</span>`;
   const back = w.returnTime
-    ? `<br /><small>retur ${escapeHtml(w.returnDate)} kl ${escapeHtml(w.returnTime)}</small>`
+    ? `<br /><small>retur ${escapeHtml(w.returnDate)} ${escapeHtml(w.returnTime)}</small>`
     : "";
   tr.querySelector('[data-cell="trip"]').innerHTML =
-    `${w.route.replace("-", " → ")}<br /><small>${escapeHtml(w.date)} kl ${escapeHtml(w.departureTime)} · ${w.adults} vuxna · ${escapeHtml(vehicleLabels[w.vehicle] ?? w.vehicle)}</small>${back}`;
+    `${escapeHtml(legs(w.route))}${paused}<br /><small>${escapeHtml(w.date)} ${escapeHtml(w.departureTime)}</small>${back}`;
+
+  tr.querySelector('[data-cell="auto"]').innerHTML = w.booking?.autoBook
+    ? `<span class="robot" title="${escapeHtml(describeBookingPrefs(w.booking))}" aria-label="Autobokar">🤖</span>`
+    : "";
 
   tr.querySelector('[data-cell="status"]').innerHTML = statusIndicator(w.lastStatus, w.lastDetail);
 
-  tr.querySelector('[data-cell="actions"]').innerHTML = `
+  const detail = tbody.querySelector(`tr.detail-row[data-watch="${w.id}"]`);
+  if (!detail) return;
+
+  const activeBox = detail.querySelector('input[data-action="toggle"]');
+  if (activeBox.checked !== w.active) activeBox.checked = w.active;
+  detail.querySelector('[data-cell="active-label"]').textContent = w.active ? "Aktiv" : "Pausad";
+
+  detail.querySelector('[data-cell="facts"]').innerHTML = [
+    fact("Resenärer", `${w.adults} ${w.adults === 1 ? "vuxen" : "vuxna"}`),
+    fact("Fordon", escapeHtml(vehicleLabels[w.vehicle] ?? w.vehicle)),
+    fact("Bevakar", escapeHtml(`${w.booking?.fareOrder?.join(" → ") ?? "—"} · ${w.booking?.salongs?.join(", ") ?? "—"}`)),
+    fact(
+      "Autobokning",
+      w.booking?.autoBook
+        ? escapeHtml(
+            `Ja · max ${w.booking.maxPrice} kr${w.booking.seatReservation ? " · + platsreservation" : ""}`
+          )
+        : "Nej"
+    ),
+    fact("Senaste besked", w.lastDetail ? escapeHtml(w.lastDetail.replace(/\*\*/g, "")) : ""),
+  ].join("");
+
+  detail.querySelector('[data-cell="actions"]').innerHTML = `
         ${iconButton({
           action: "check",
           id: w.id,
@@ -225,12 +278,11 @@ function updateWatchRow(w) {
           busy: checking.has(w.id),
         })}
         ${iconButton({ action: "delete", id: w.id, icon: ICON_DELETE, label: "Ta bort", danger: true })}`;
+}
 
-  const summary = tbody.querySelector(`tr.auto-summary-row[data-watch="${w.id}"]`);
-  if (summary) {
-    summary.hidden = !w.booking?.autoBook;
-    summary.querySelector(".auto-summary-text").innerHTML = describeBookingPrefs(w.booking);
-  }
+/** "Visby-Nynäshamn" as the two ends of the trip, which is the whole of the row's answer. */
+function legs(route) {
+  return route.replace("-", " → ");
 }
 
 function iconButton({ action, id, icon, label, busy = false, danger = false }) {
@@ -253,9 +305,8 @@ function statusIndicator(status, detail) {
   return `<span class="status-dot status-${status}" title="${escapeHtml(title)}" aria-label="${escapeHtml(title)}"></span>`;
 }
 
-/** What the watch is allowed to buy, for the line under an auto-booking watch. A watch
- * that does not auto-book has no line: "Autoboka: av" was a setting you could go and
- * change, and now it is just noise on every ordinary row. */
+/** What an auto-booking watch may buy — the robot's tooltip on the row, and nothing else:
+ * the same facts are spelled out in the detail, where there is room for words. */
 function describeBookingPrefs(booking) {
   if (!booking?.autoBook) return "";
   const fares = booking.fareOrder?.length ? booking.fareOrder.join(" → ") : "ingen biljettklass vald";
@@ -309,6 +360,7 @@ roundTrip.addEventListener("change", () => {
 });
 
 const autoBookBox = document.querySelector("#auto-book");
+const scopeBlock = document.querySelector("#scope-block");
 const bookingBlock = document.querySelector("#booking-block");
 autoBookBox.addEventListener("change", () => {
   bookingBlock.hidden = !autoBookBox.checked;
@@ -321,7 +373,8 @@ function resetAddForm() {
   formError.textContent = "";
   returnFields.hidden = true;
   bookingBlock.hidden = true;
-  bookingBlock.innerHTML = renderBookingPrefs(null);
+  scopeBlock.innerHTML = renderWatchScope(null);
+  bookingBlock.innerHTML = renderAutoFields(null);
   document.querySelector("#route-select").value = "Visby-Nynäshamn";
   document.querySelector("#vehicle-select").value = "car-under-225";
 }
@@ -331,7 +384,7 @@ form.addEventListener("submit", async (e) => {
   formError.textContent = "";
   const data = Object.fromEntries(new FormData(form).entries());
   data.adults = Number(data.adults);
-  data.booking = readBookingPrefs(bookingBlock, autoBookBox.checked);
+  data.booking = readBookingPrefs(scopeBlock, bookingBlock, autoBookBox.checked);
 
   try {
     const res = await fetch("/api/watches", {
@@ -356,7 +409,13 @@ tbody.addEventListener("click", async (e) => {
   if (!btn) return;
   const { action, id } = btn.dataset;
 
-  if (action === "delete") {
+  if (action === "expand") {
+    const detail = tbody.querySelector(`[data-detail-for="${id}"]`);
+    detail.hidden = !detail.hidden;
+    btn.setAttribute("aria-expanded", String(!detail.hidden));
+    btn.classList.toggle("open", !detail.hidden);
+    btn.setAttribute("aria-label", detail.hidden ? "Visa mer om bevakningen" : "Dölj detaljer");
+  } else if (action === "delete") {
     if (!confirm("Ta bort denna bevakning?")) return;
     await fetch(`/api/watches/${id}`, { method: "DELETE" });
     await loadWatches();
@@ -533,8 +592,9 @@ settingsForm.addEventListener("submit", async (e) => {
 });
 
 loadOptions().then(() => {
-  // The form's booking fields are built from the server's options, so they wait for them.
-  bookingBlock.innerHTML = renderBookingPrefs(null);
+  // The form's fare and lounge fields are built from the server's options, so they wait.
+  scopeBlock.innerHTML = renderWatchScope(null);
+  bookingBlock.innerHTML = renderAutoFields(null);
   return loadWatches();
 });
 loadSettings({ fillInputs: true });

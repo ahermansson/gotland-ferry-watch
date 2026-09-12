@@ -29,10 +29,10 @@
       <table id="watch-table">
         <thead>
           <tr>
-            <th>Aktiv</th>
+            <th><span class="visually-hidden">Visa mer</span></th>
             <th>Resa</th>
+            <th><span class="visually-hidden">Autobokning</span></th>
             <th>Status</th>
-            <th></th>
           </tr>
         </thead>
         <tbody></tbody>
@@ -79,13 +79,14 @@
             <input name="returnTime" placeholder="16:30" pattern="\d{2}:\d{2}" />
           </label>
         </div>
+        <div id="scope-block"></div>
         <label class="inline-check">
           <input type="checkbox" id="auto-book" />
           Autoboka när platsen dyker upp
         </label>
-        <p class="hint" id="auto-book-hint">Bestäms här och går inte att ändra efteråt. Ångrar du dig:
-          ta bort bevakningen och lägg till den igen. Autobokning stannar alltid vid kassan och
-          frågar i Discord innan något köps.</p>
+        <p class="hint" id="auto-book-hint">Allt ovan bestäms här och går inte att ändra efteråt.
+          Ångrar du dig: ta bort bevakningen och lägg till den igen. Autobokning stannar alltid vid
+          kassan och frågar i Discord innan något köps.</p>
         <div id="booking-block" hidden></div>
         <p class="hint">Avgångstiden måste matcha sajtens tabell exakt, t.ex. <code>07:15</code>.</p>
         <div class="dialog-actions">

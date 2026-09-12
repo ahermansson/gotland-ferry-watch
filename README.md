@@ -45,16 +45,20 @@ cycle while the other leg opening still is.
 
 ## Auto-booking settings
 
-Each watch carries what an auto-booking would be allowed to buy: the fare classes in
-ranked order (the highest ranked one that can be booked wins), the lounges that will do
-(the cheapest permitted one is taken), a price cap for the whole trip, and whether to add
-the paid seat reservation.
+A watch says which fare classes and which lounges it is watching for, and those are what
+count as a hit: a watch for Försalong is not answered by a free Barnsalong, and the check
+reports "det finns lediga platser, men inte i biljettklass/salong du bevakar" rather than
+staying silent about why. The fare classes are ranked, best first.
+
+Auto-booking adds exactly two things on top: a price cap for the whole trip, and whether
+to buy the paid seat reservation. When it fires, the highest ranked bookable fare wins and
+the cheapest permitted lounge is taken.
 
 **All of it is decided when the watch is added, and none of it can be changed afterwards.**
-Tick **Autoboka** in the add form and the settings appear under it; the watch then carries
-a line in the table saying what it is allowed to buy, and that line is a fact, not a
-control. There is no switch on the row and `PATCH /api/watches/:id` refuses a `booking`
-body — an auto-booking that can be turned off from a table is one that can be turned off by
+Fare classes and lounges are part of the add form itself; ticking **Autoboka** reveals the
+price cap and the seat reservation. A watch that auto-books carries a 🤖 on its row, and
+the detail behind the row's arrow spells out what it may buy. There is no switch on the row
+and `PATCH /api/watches/:id` refuses a `booking` body — an auto-booking that can be turned off from a table is one that can be turned off by
 a mis-tap, and an auto-booking that is silently off is the failure this whole flow exists to
 prevent. Changed your mind: delete the watch and add it again.
 
@@ -94,6 +98,14 @@ console line too, so the terminal stays the complete record. Repeats are throttl
 condition (one message an hour per watch and reason, so a single broken watch can't bury
 the channel) and the throttle clears the moment the checks recover.
 
+## The watch table
+
+A row answers one question — which trip, and when — plus a 🤖 when the watch may buy it and
+a dot for how it stands. The arrow on the left opens everything else about it: passengers,
+vehicle, what counts as a hit, what it may pay, what the last check actually said, and the
+controls (pause, check now, delete). A paused watch says so on the row itself, since that
+is the one piece of state you would otherwise have to open a row to discover.
+
 ## Lounge priority
 
 Lounges are grouped into tiers, shown in notifications as:
@@ -105,9 +117,10 @@ Lounges are grouped into tiers, shown in notifications as:
 | Last resort | Barnsalong, Djursalong | ⚠️ |
 | Other | Kupé (Utsides/Insides/Djur/HCP/Allergi) and anything new | – |
 
-A watch counts as "available" when **any** fare class has **any** bookable lounge; the
-message tells you which, so you can judge whether it's worth taking. Adjust the mapping in
-`SALONG_TIERS` in `src/types.ts`.
+A watch counts as "available" when a fare class **it is watching** has a bookable lounge
+**it is watching**; the message tells you which, so you can judge whether it's worth taking.
+The tiers above only order and mark them — they do not decide the hit, the watch's own
+choices do. Adjust the mapping in `SALONG_TIERS` in `src/types.ts`.
 
 ## Setup
 

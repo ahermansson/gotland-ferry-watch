@@ -109,9 +109,9 @@ async function reportPartial(watch: Watch, result: CheckResult): Promise<void> {
     return;
   }
 
-  const freeLeg: TripLeg | null = result.offer && isBookable(result.offer)
+  const freeLeg: TripLeg | null = result.offer && isBookable(result.offer, watch.booking)
     ? "out"
-    : result.returnOffer && isBookable(result.returnOffer)
+    : result.returnOffer && isBookable(result.returnOffer, watch.booking)
       ? "return"
       : null;
   if (!freeLeg || freeLeg === watch.partialNotifiedLeg) return;
