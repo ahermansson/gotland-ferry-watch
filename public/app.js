@@ -37,9 +37,6 @@ const checking = new Set();
  */
 const pendingAuto = new Set();
 
-/** Watches whose booking panel is open, so a redraw doesn't fold it away mid-edit. */
-const openPrefs = new Set();
-
 // Inline so a row costs no extra request, and stroke-drawn so they take the button's own
 // colour on hover and when disabled.
 const ICON_RUN = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="23 4 23 10 17 10" /><polyline points="1 20 1 14 7 14" /><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" /></svg>`;
@@ -154,26 +151,98 @@ async function loadWatches() {
     return;
   }
 
-  tbody.innerHTML = "";
-  for (const w of watches) {
-    const tr = document.createElement("tr");
-    const lastChecked = w.lastCheckedAt ? clockTime(w.lastCheckedAt) : "–";
-    const back = w.returnTime
-      ? `<br /><small>retur ${escapeHtml(w.returnDate)} kl ${escapeHtml(w.returnTime)}</small>`
-      : "";
-    const trip = `${w.route.replace("-", " → ")}<br /><small>${escapeHtml(w.date)} kl ${escapeHtml(w.departureTime)} · ${w.adults} vuxna · ${escapeHtml(vehicleLabels[w.vehicle] ?? w.vehicle)}</small>${back}`;
+  renderWatches(watches);
+}
 
-    tr.innerHTML = `
+/**
+ * Rows are created once and updated in place -- never rebuilt. The poll below runs every
+ * 15 seconds, and rebuilding the table on each one regenerated the booking panel from the
+ * SAVED prefs: a half-filled form, typed but not yet saved, was wiped a quarter of a
+ * minute after you started filling it in. The panel is therefore stateless as far as this
+ * code is concerned -- rendered once from what the server holds, and owned by whoever is
+ * typing in it until Spara says otherwise.
+ *
+ * What the poll is for is the rest of the row: a watch that found a seat, one that
+ * deactivated itself after notifying or after its departure passed, a check in progress.
+ * None of that is anything a person is editing.
+ */
+function renderWatches(watches) {
+  const live = new Set(watches.map((w) => w.id));
+  for (const row of [...tbody.querySelectorAll("tr[data-watch]")]) {
+    if (!live.has(row.dataset.watch)) row.remove();
+  }
+  for (const w of watches) {
+    if (!tbody.querySelector(`tr.watch-row[data-watch="${w.id}"]`)) createWatchRows(w);
+    updateWatchRow(w);
+  }
+}
+
+/** The three rows a watch owns: the watch itself, its Auto summary, its booking panel. */
+function createWatchRows(w) {
+  const tr = document.createElement("tr");
+  tr.className = "watch-row";
+  tr.dataset.watch = w.id;
+  tr.innerHTML = `
       <td>
         <label class="toggle">
-          <input type="checkbox" data-action="toggle" data-id="${w.id}" ${w.active ? "checked" : ""} />
+          <input type="checkbox" data-action="toggle" data-id="${w.id}" />
           <span class="toggle-track"></span>
         </label>
       </td>
-      <td>${trip}</td>
-      <td>${statusIndicator(w.lastStatus, w.lastDetail)}</td>
-      <td>${escapeHtml(lastChecked)}</td>
-      <td class="actions">
+      <td data-cell="trip"></td>
+      <td data-cell="status"></td>
+      <td class="actions" data-cell="actions"></td>
+    `;
+  tbody.appendChild(tr);
+
+  // Always visible, unlike the editable panel below it — this is what makes an
+  // auto-booked watch's settings show up on the row itself, not just after a click.
+  const summary = document.createElement("tr");
+  summary.className = "auto-summary-row";
+  summary.dataset.watch = w.id;
+  summary.innerHTML = `<td colspan="4">
+      <div class="auto-summary">
+        <label class="toggle">
+          <input type="checkbox" data-action="auto" data-id="${w.id}" />
+          <span class="toggle-track"></span>
+        </label>
+        <span class="auto-summary-text"></span>
+      </div>
+    </td>`;
+  tbody.appendChild(summary);
+
+  // Hidden rather than absent, so opening the panel costs no round trip. Its contents are
+  // written here and never again: see renderWatches.
+  const panel = document.createElement("tr");
+  panel.className = "prefs-row";
+  panel.dataset.watch = w.id;
+  panel.dataset.prefsFor = w.id;
+  panel.hidden = true;
+  panel.innerHTML = `<td colspan="4">${renderBookingPrefs(w.booking)}
+      <div class="prefs-actions">
+        <button type="button" data-action="save-prefs" data-id="${w.id}">Spara</button>
+        <span class="error" data-prefs-error="${w.id}"></span>
+      </div></td>`;
+  tbody.appendChild(panel);
+}
+
+/** Everything on a watch's rows that the server decides. The panel is not in this list. */
+function updateWatchRow(w) {
+  const tr = tbody.querySelector(`tr.watch-row[data-watch="${w.id}"]`);
+  if (!tr) return;
+
+  const activeBox = tr.querySelector('input[data-action="toggle"]');
+  if (activeBox.checked !== w.active) activeBox.checked = w.active;
+
+  const back = w.returnTime
+    ? `<br /><small>retur ${escapeHtml(w.returnDate)} kl ${escapeHtml(w.returnTime)}</small>`
+    : "";
+  tr.querySelector('[data-cell="trip"]').innerHTML =
+    `${w.route.replace("-", " → ")}<br /><small>${escapeHtml(w.date)} kl ${escapeHtml(w.departureTime)} · ${w.adults} vuxna · ${escapeHtml(vehicleLabels[w.vehicle] ?? w.vehicle)}</small>${back}`;
+
+  tr.querySelector('[data-cell="status"]').innerHTML = statusIndicator(w.lastStatus, w.lastDetail);
+
+  tr.querySelector('[data-cell="actions"]').innerHTML = `
         ${iconButton({
           action: "check",
           id: w.id,
@@ -182,42 +251,14 @@ async function loadWatches() {
           busy: checking.has(w.id),
         })}
         ${iconButton({ action: "prefs", id: w.id, icon: ICON_PREFS, label: "Bokningsinställningar" })}
-        ${iconButton({ action: "delete", id: w.id, icon: ICON_DELETE, label: "Ta bort", danger: true })}
-      </td>
-    `;
-    tbody.appendChild(tr);
+        ${iconButton({ action: "delete", id: w.id, icon: ICON_DELETE, label: "Ta bort", danger: true })}`;
 
-    // Always visible, unlike the editable panel below it — this is what makes an
-    // auto-booked watch's settings show up on the row itself, not just after a click.
-    const unsaved = pendingAuto.has(w.id);
-    const summary = document.createElement("tr");
-    summary.className = "auto-summary-row";
-    summary.innerHTML = `<td colspan="5">
-      <div class="auto-summary">
-        <label class="toggle">
-          <input type="checkbox" data-action="auto" data-id="${w.id}" ${w.booking?.autoBook || unsaved ? "checked" : ""} />
-          <span class="toggle-track"></span>
-        </label>
-        <span class="auto-summary-text${unsaved ? " unsaved" : ""}">${
-          unsaved ? "Ej sparad — fyll i nedan och tryck Spara för att slå på" : describeBookingPrefs(w.booking)
-        }</span>
-      </div>
-    </td>`;
-    tbody.appendChild(summary);
-
-    // Kept in the DOM but hidden, so opening the panel costs no round trip and the
-    // 15 s redraw can restore whatever was open.
-    const panel = document.createElement("tr");
-    panel.className = "prefs-row";
-    panel.dataset.prefsFor = w.id;
-    panel.hidden = !openPrefs.has(w.id);
-    panel.innerHTML = `<td colspan="5">${renderBookingPrefs(w.booking)}
-      <div class="prefs-actions">
-        <button type="button" data-action="save-prefs" data-id="${w.id}">Spara</button>
-        <span class="error" data-prefs-error="${w.id}"></span>
-      </div></td>`;
-    tbody.appendChild(panel);
-  }
+  // A ticked-but-unsaved Auto switch is the user's, not the server's: leave both the
+  // switch and the line alone until a save settles which of the two is right.
+  if (pendingAuto.has(w.id)) return;
+  const autoBox = tbody.querySelector(`input[data-action="auto"][data-id="${w.id}"]`);
+  if (autoBox && autoBox.checked !== !!w.booking?.autoBook) autoBox.checked = !!w.booking?.autoBook;
+  paintAutoSummary(w.id, w.booking);
 }
 
 function iconButton({ action, id, icon, label, busy = false, danger = false }) {
@@ -367,14 +408,11 @@ tbody.addEventListener("click", async (e) => {
     if (!confirm("Ta bort denna bevakning?")) return;
     await fetch(`/api/watches/${id}`, { method: "DELETE" });
     pendingAuto.delete(id);
-    openPrefs.delete(id);
     await loadWatches();
     await loadSettings({ fillInputs: false });
   } else if (action === "prefs") {
     const panel = tbody.querySelector(`[data-prefs-for="${id}"]`);
     panel.hidden = !panel.hidden;
-    if (panel.hidden) openPrefs.delete(id);
-    else openPrefs.add(id);
   } else if (action === "save-prefs") {
     const panel = tbody.querySelector(`[data-prefs-for="${id}"]`);
     const errorEl = panel.querySelector(`[data-prefs-error="${id}"]`);
@@ -401,12 +439,13 @@ tbody.addEventListener("click", async (e) => {
     // Left open on purpose: you just set this, and closing it here would fold the panel
     // away before you've had a chance to see what got saved.
     await loadWatches();
-    const freshError = tbody.querySelector(`[data-prefs-error="${id}"]`);
-    if (freshError) {
-      freshError.textContent = "Sparat.";
-      freshError.classList.add("ok");
-      setTimeout(() => freshError.classList.remove("ok"), 2000);
-    }
+    // The panel is no longer rebuilt by a load, so this is the same element throughout.
+    errorEl.textContent = "Sparat.";
+    errorEl.classList.add("ok");
+    setTimeout(() => {
+      errorEl.classList.remove("ok");
+      if (errorEl.textContent === "Sparat.") errorEl.textContent = "";
+    }, 2000);
   } else if (action === "check") {
     checking.add(id);
     await loadWatches();
@@ -433,7 +472,6 @@ tbody.addEventListener("change", async (e) => {
     // that's only going to be refused. "Spara" in the panel is what actually turns it on.
     if (auto.checked) {
       panel.hidden = false;
-      openPrefs.add(auto.dataset.id);
       // Left ticked: it shows intent, and "Spara" below reads this same checkbox to
       // decide what to save. Nothing is persisted until that click succeeds -- which is
       // what the row now says, in words, instead of leaving a ticked switch to imply
@@ -456,7 +494,6 @@ tbody.addEventListener("change", async (e) => {
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
       panel.hidden = false;
-      openPrefs.add(auto.dataset.id);
       panel.querySelector(`[data-prefs-error="${auto.dataset.id}"]`).textContent = body.error ?? `HTTP ${res.status}`;
     }
     return;
