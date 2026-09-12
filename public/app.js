@@ -550,10 +550,16 @@ function renderSettings(settings, { fillInputs }) {
     settings.consecutiveFailures > 0
       ? ` Väntetiden är uppdubblad efter ${settings.consecutiveFailures} misslyckad(e) cykel/cykler.`
       : "";
+  // Said only when it applies, and only when the window is a limit at all: with the window
+  // off, "dygnet runt" is already what everything does.
+  const aroundClock =
+    settings.aroundTheClock && activeFrom !== activeTo
+      ? " Bevakningar med autobokning kollas dygnet runt — de väcker ingen."
+      : "";
   settingsStatus.textContent = settings.idle
     ? `Inget kollas just nu. Slå på en bevakning eller lägg till en ny, så körs kontrollerna` +
       ` med ${span} minuters mellanrum ${window}.`
-    : `Kollar med ${span} minuters mellanrum ${window}.${backoff}`;
+    : `Kollar med ${span} minuters mellanrum ${window}.${backoff}${aroundClock}`;
 
   schedulerState = settings;
   renderCountdown();

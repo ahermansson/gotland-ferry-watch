@@ -199,6 +199,15 @@ checks every active watch in turn, so once more than one watch is active there i
 single "next check" to count down to. Outside the window it shows the clock time the next
 cycle starts instead, since that wait is hours rather than minutes.
 
+**A watch with auto-booking ignores the window and is checked around the clock.** The
+window exists so a free seat at 04:00 doesn't wake somebody who would have to book it by
+hand; a watch that books by itself has no such problem, and a cancellation is released as
+often at night as at noon. Both halves have to be on — a watch marked Auto while
+`AUTO_BOOKING_ENABLED` is off cannot buy anything, so checking it at night would produce
+exactly the 04:00 notification the window was added to prevent. Outside the window, a cycle
+therefore runs over the armed watches only; with none, the scheduler sleeps until the
+window opens as before.
+
 The same card sets the daily window the checks run in (default 06:00–00:00, Swedish time —
 nobody releases ferry tickets at 03:00, and nobody books one then either). Outside the
 window the scheduler sleeps until it opens rather than waking up to do nothing, so a night
