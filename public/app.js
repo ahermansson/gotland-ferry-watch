@@ -28,6 +28,15 @@ let bookingDefaults = null;
  * 15 s, so without this the button springs back to "Kolla nu" mid-check and the check
  * looks like it never ran. */
 const checking = new Set();
+/**
+ * Watches whose Auto switch is ticked but NOT saved. Ticking it only opens the panel --
+ * turning auto-booking on needs a price cap and at least one fare and lounge, which an
+ * untouched panel hasn't got -- so the switch alone is an intent, not a setting. Held here
+ * so the 15 s redraw neither silently unticks it nor lets it read as saved: the row says
+ * "ej sparad" for exactly as long as that is true.
+ */
+const pendingAuto = new Set();
+
 /** Watches whose booking panel is open, so a redraw doesn't fold it away mid-edit. */
 const openPrefs = new Set();
 
@@ -180,15 +189,18 @@ async function loadWatches() {
 
     // Always visible, unlike the editable panel below it — this is what makes an
     // auto-booked watch's settings show up on the row itself, not just after a click.
+    const unsaved = pendingAuto.has(w.id);
     const summary = document.createElement("tr");
     summary.className = "auto-summary-row";
     summary.innerHTML = `<td colspan="5">
       <div class="auto-summary">
         <label class="toggle">
-          <input type="checkbox" data-action="auto" data-id="${w.id}" ${w.booking?.autoBook ? "checked" : ""} />
+          <input type="checkbox" data-action="auto" data-id="${w.id}" ${w.booking?.autoBook || unsaved ? "checked" : ""} />
           <span class="toggle-track"></span>
         </label>
-        <span class="auto-summary-text">${describeBookingPrefs(w.booking)}</span>
+        <span class="auto-summary-text${unsaved ? " unsaved" : ""}">${
+          unsaved ? "Ej sparad — fyll i nedan och tryck Spara för att slå på" : describeBookingPrefs(w.booking)
+        }</span>
       </div>
     </td>`;
     tbody.appendChild(summary);
@@ -226,6 +238,27 @@ function iconButton({ action, id, icon, label, busy = false, danger = false }) {
 function statusIndicator(status, detail) {
   const title = `${statusLabel(status)}${detail ? ` — ${detail.replace(/\*\*/g, "")}` : ""}`;
   return `<span class="status-dot status-${status}" title="${escapeHtml(title)}" aria-label="${escapeHtml(title)}"></span>`;
+}
+
+/**
+ * Repaints one watch's Auto summary without a redraw. loadWatches() regenerates the panel
+ * from the SAVED prefs, so calling it here would throw away the half-filled form that is
+ * the whole reason the switch is pending.
+ */
+function paintAutoSummary(id, saved) {
+  const box = tbody.querySelector(`input[data-action="auto"][data-id="${id}"]`);
+  const text = box?.closest(".auto-summary")?.querySelector(".auto-summary-text");
+  if (!text) return;
+  if (pendingAuto.has(id)) {
+    text.textContent = "Ej sparad — fyll i nedan och tryck Spara för att slå på";
+    text.classList.add("unsaved");
+    return;
+  }
+  text.classList.remove("unsaved");
+  // `saved` is what the server just accepted. Without it the line would keep describing
+  // the old settings until the 15 s redraw -- which is how switching Auto off left "🤖
+  // Auto: ..." sitting on the row for a quarter of a minute after it stopped being true.
+  if (saved) text.innerHTML = describeBookingPrefs(saved);
 }
 
 /** The one-line summary shown on every watch row, so auto-booking settings don't hide
@@ -333,6 +366,8 @@ tbody.addEventListener("click", async (e) => {
   if (action === "delete") {
     if (!confirm("Ta bort denna bevakning?")) return;
     await fetch(`/api/watches/${id}`, { method: "DELETE" });
+    pendingAuto.delete(id);
+    openPrefs.delete(id);
     await loadWatches();
     await loadSettings({ fillInputs: false });
   } else if (action === "prefs") {
@@ -354,10 +389,15 @@ tbody.addEventListener("click", async (e) => {
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
       errorEl.textContent = body.error ?? `HTTP ${res.status}`;
-      // Nothing was saved, so a checked Auto box would be showing an intent that failed.
-      if (autoBox.checked) autoBox.checked = false;
+      // Nothing was saved. The box stays ticked -- it is what you asked for, and the row
+      // already says "ej sparad" -- while the error says what is missing. Unticking it
+      // here would answer a failed save by quietly discarding the intent instead.
+      if (autoBox.checked) pendingAuto.add(id);
+      paintAutoSummary(id);
       return;
     }
+    // Saved: whatever the server now holds is the truth about this watch.
+    pendingAuto.delete(id);
     // Left open on purpose: you just set this, and closing it here would fold the panel
     // away before you've had a chance to see what got saved.
     await loadWatches();
@@ -394,16 +434,25 @@ tbody.addEventListener("change", async (e) => {
     if (auto.checked) {
       panel.hidden = false;
       openPrefs.add(auto.dataset.id);
-      // Left checked: it shows intent, and "Spara" below reads this same checkbox to
-      // decide what to save. Nothing is actually persisted until that click succeeds.
+      // Left ticked: it shows intent, and "Spara" below reads this same checkbox to
+      // decide what to save. Nothing is persisted until that click succeeds -- which is
+      // what the row now says, in words, instead of leaving a ticked switch to imply
+      // otherwise until the next redraw silently unticked it.
+      pendingAuto.add(auto.dataset.id);
+      paintAutoSummary(auto.dataset.id);
+      const errorEl = panel.querySelector(`[data-prefs-error="${auto.dataset.id}"]`);
+      if (errorEl) errorEl.textContent = "Autobokning slås på när du trycker Spara.";
       return;
     }
 
+    pendingAuto.delete(auto.dataset.id);
+    const off = readBookingPrefs(panel, false);
     const res = await fetch(`/api/watches/${auto.dataset.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ booking: readBookingPrefs(panel, false) }),
+      body: JSON.stringify({ booking: off }),
     });
+    if (res.ok) paintAutoSummary(auto.dataset.id, off);
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
       panel.hidden = false;

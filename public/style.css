@@ -496,6 +496,13 @@ td small { color: #666; }
   overflow-wrap: anywhere;
 }
 
+/* An Auto switch that is ticked but not saved. Amber rather than the muted grey of a
+   saved summary: it is a state that needs an action, not a fact about the watch. */
+.auto-summary-text.unsaved {
+  color: #b7791f;
+  font-weight: 600;
+}
+
 .toggle {
   position: relative;
   display: inline-block;

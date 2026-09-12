@@ -169,12 +169,37 @@ export async function requestBookingApproval(watch: Watch): Promise<{ requested:
   if (!client) return { requested: false, detail: "Discord-boten är inte ansluten." };
 
   const channelId = process.env.DISCORD_CHANNEL_ID;
-  const approvers = approverIds();
   if (!channelId) return { requested: false, detail: "DISCORD_CHANNEL_ID saknas." };
-  if (approvers.size === 0) return { requested: false, detail: "DISCORD_APPROVERS är tom -- ingen kan godkänna." };
+  if (approverIds().size === 0) {
+    return { requested: false, detail: "DISCORD_APPROVERS är tom -- ingen kan godkänna." };
+  }
 
   inFlight.add(watch.id);
+  try {
+    return await prepareAndAsk(watch, client, channelId);
+  } catch (error) {
+    // The id is released on every ordinary refusal below, but a THROW used to skip all of
+    // them: prepareBooking rejecting outside its own try (chromium.launch failing, say)
+    // left the id in inFlight for the life of the process, and from then on every check
+    // read "ett köp väntar redan" and returned early -- no booking, and no notification
+    // either, for ever. Silence was the one outcome this whole file exists to prevent.
+    inFlight.delete(watch.id);
+    return {
+      requested: false,
+      detail: `Förberedelsen kraschade: ${error instanceof Error ? error.message : String(error)}`,
+    };
+  }
+}
 
+/**
+ * The body of requestBookingApproval, split out so the inFlight guard above is a plain
+ * try/catch around the whole of it rather than a delete repeated on every exit.
+ */
+async function prepareAndAsk(
+  watch: Watch,
+  client: Client,
+  channelId: string
+): Promise<{ requested: boolean; detail: string }> {
   const channel = await client.channels.fetch(channelId).catch(() => null);
   if (!channel || !channel.isTextBased() || !("send" in channel)) {
     inFlight.delete(watch.id);
