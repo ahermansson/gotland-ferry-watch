@@ -72,11 +72,33 @@ a screenshot and a "Godkänn köp" / "Avbryt" button pair. The browser session i
 parked, until one of the ids in `DISCORD_APPROVERS` clicks — within `BOOKING_APPROVAL_MINUTES`,
 after which it's dropped unpressed and the watch keeps running.
 
-**Betala is only ever clicked in one place** (`pressBetala` in `src/booking.ts`), only
-reachable from the approval click in `src/purchase.ts`. `npm run book -- <watchId>` runs
-the same flow manually for testing and always closes the session unpressed — there is no
-flag that makes it press Betala. A price cap is required before a watch's Auto switch can
-be turned on at all: it is the one limit that still holds when everything else misreads.
+**Betala is only ever clicked in one place** (`pressBetala` in `src/booking.ts`), and it is
+reachable from exactly two call sites, both in `src/purchase.ts`: an approved click, and
+the unattended path below. `npm run book -- <watchId>` runs the same flow manually for
+testing and always closes the session unpressed — no setting makes the dry run press
+Betala. A price cap is required before a watch's Auto switch can be turned on at all: it is
+the one limit that still holds when everything else misreads.
+
+### Buying without being asked
+
+`AUTO_BOOKING_UNATTENDED=1` (default `0`) pays the prepared checkout immediately instead of
+asking, and tells Discord afterwards with the screenshot. It exists because the asking
+version cannot do the thing a ferry watch is for: at 04:00 a cancellation appears, the flow
+prepares a checkout, nobody is awake to press the button, and ten minutes later the session
+is dropped and re-prepared on the next cycle — all night, buying nothing.
+
+With it on, what stands between a check and a purchase is: `AUTO_BOOKING_ENABLED`, the
+watch's own Auto switch, the fare class and lounge that watch asked for, and the price cap.
+Set the cap to what you are willing to wake up to having paid.
+
+**This is also what exempts a watch from the daily window.** A watch that still needs a
+human at 04:00 is what the window exists to prevent, whoever is doing the asking — so the
+exemption follows this switch, not the Auto switch.
+
+The purchase message never pings: somebody who turned this on did it so the seat would be
+bought while they slept, and waking them to say it worked would undo the point. It is sent
+even when the bot is down, through the webhook, because a purchase nobody was told about is
+worse than a purchase nobody approved.
 
 ## What it reports, and where
 
@@ -199,14 +221,13 @@ checks every active watch in turn, so once more than one watch is active there i
 single "next check" to count down to. Outside the window it shows the clock time the next
 cycle starts instead, since that wait is hours rather than minutes.
 
-**A watch with auto-booking ignores the window and is checked around the clock.** The
-window exists so a free seat at 04:00 doesn't wake somebody who would have to book it by
-hand; a watch that books by itself has no such problem, and a cancellation is released as
-often at night as at noon. Both halves have to be on — a watch marked Auto while
-`AUTO_BOOKING_ENABLED` is off cannot buy anything, so checking it at night would produce
-exactly the 04:00 notification the window was added to prevent. Outside the window, a cycle
-therefore runs over the armed watches only; with none, the scheduler sleeps until the
-window opens as before.
+**A watch that buys unattended ignores the window and is checked around the clock.** The
+window exists so a free seat at 04:00 doesn't wake somebody who would have to act on it;
+a watch that completes the purchase by itself needs nobody, and a cancellation is released
+as often at night as at noon. All three have to be on — the watch's Auto switch,
+`AUTO_BOOKING_ENABLED` and `AUTO_BOOKING_UNATTENDED` — because a watch that still asks is
+a watch that asks at 04:00. Outside the window, a cycle therefore runs over those watches
+only; with none, the scheduler sleeps until the window opens as before.
 
 The same card sets the daily window the checks run in (default 06:00–00:00, Swedish time —
 nobody releases ferry tickets at 03:00, and nobody books one then either). Outside the
@@ -261,7 +282,8 @@ minutes) — not for bulk scraping. Please:
 The scraper (used by the scheduled checks) never logs in, never proceeds past lounge
 selection, and never books anything. `npm run book` is a separate, manually-run tool that
 does log in and drive a real purchase up to the checkout page — it is never triggered by
-the scheduler.
+the scheduler, and never presses Betala. The purchase flow itself only runs for a watch
+with Auto on, and only when a departure it is watching for actually opens up.
 
 ## Project structure
 

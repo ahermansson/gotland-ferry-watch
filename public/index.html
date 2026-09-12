@@ -131,8 +131,9 @@
           landar på samma klockslag varje timme. Misslyckas alla kollar i en cykel fördubblas
           väntetiden (max 8×) tills en lyckas.</p>
         <p class="hint">Fönstret finns för att du inte ska väckas av en ledig plats mitt i natten.
-          En bevakning med <strong>autobokning</strong> struntar därför i det och kollas dygnet runt —
-          den väcker ingen, den köper.</p>
+          En bevakning som <strong>köper helt på egen hand</strong> struntar därför i det och kollas
+          dygnet runt — den väcker ingen. Det kräver <code>AUTO_BOOKING_UNATTENDED=1</code> i
+          <code>.env</code>; är godkännande kvar frågar den dig, och då gäller fönstret.</p>
         <p class="hint">Tidsfönstret gäller svensk tid. Sluttid före starttid betyder ett fönster
           över midnatt, och samma tid i båda fälten stänger av fönstret helt — då kollas det
           dygnet runt. <strong>Kolla nu</strong> fungerar alltid, även utanför fönstret.</p>

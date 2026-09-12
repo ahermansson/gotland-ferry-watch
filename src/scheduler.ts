@@ -9,7 +9,7 @@ import {
 } from "./db.js";
 import { broadcast } from "./events.js";
 import { report, resetReportThrottle, sendDiscordNotification } from "./notifier.js";
-import { autoBookingEnabled, requestBookingApproval } from "./purchase.js";
+import { autoBookingEnabled, requestBookingApproval, unattendedBuying } from "./purchase.js";
 import { checkAvailability, isBookable } from "./scraper.js";
 import { VEHICLE_LABELS, type CheckResult, type TripLeg, type Watch } from "./types.js";
 
@@ -174,18 +174,19 @@ export function spacingMs(random: () => number = Math.random): number {
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /**
- * A watch that buys on its own, and is therefore exempt from the daily window.
+ * A watch that completes a purchase on its own, and is therefore exempt from the daily
+ * window.
  *
- * The window exists so nobody is woken at 04:00 to book a ferry by hand. A watch that
- * books by itself has no such problem -- and the seat it is waiting for is released
- * whenever the cancellation happened to land, which is as often at night as at noon.
- *
- * Both halves must be on. A watch marked `autoBook` while AUTO_BOOKING_ENABLED is off
- * cannot buy anything: checking it at night would produce exactly the 04:00 notification
- * the window was added to prevent.
+ * The window exists so nobody is woken at 04:00 by a seat they would have to book by
+ * hand. What earns the exemption is not being armed -- it is needing nobody. All three
+ * must hold: the watch's own Auto switch, AUTO_BOOKING_ENABLED, and
+ * AUTO_BOOKING_UNATTENDED. Miss the last one and the night check prepares a checkout that
+ * waits ten minutes for a click nobody is awake to give, drops it, and prepares it again
+ * on the next cycle -- all night, against the ferry's site, buying nothing. Being asked at
+ * 04:00 is precisely what the window was added to prevent, whoever is doing the asking.
  */
 function runsAroundTheClock(watch: Watch): boolean {
-  return watch.booking.autoBook && autoBookingEnabled();
+  return watch.booking.autoBook && autoBookingEnabled() && unattendedBuying();
 }
 
 /**

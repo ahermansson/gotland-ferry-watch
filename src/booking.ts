@@ -6,10 +6,10 @@
  *
  * `prepareBooking` stops there and hands back the still-open page -- it never clicks
  * Betala itself. `pressBetala` is the one function in this entire project that does, and
- * it is only ever called from src/purchase.ts, after a click from an approved Discord
- * user, on exactly the session that was prepared here. `npm run book` (below) calls
- * prepareBooking and then closes it unpressed, for testing the flow with no approval bot
- * involved at all.
+ * it is only ever called from src/purchase.ts, on exactly the session that was prepared
+ * here: after an approved Discord click, or immediately when AUTO_BOOKING_UNATTENDED is
+ * on. `npm run book` (below) calls prepareBooking and then closes it unpressed, for
+ * testing the flow with no approval bot and no purchase involved at all.
  */
 import "dotenv/config";
 import fs from "node:fs";
@@ -360,8 +360,10 @@ export async function prepareBooking(watch: Watch): Promise<PreparedBooking | Fa
 
 /**
  * The only call to click() on the Betala button in this codebase. Only src/purchase.ts
- * calls this, and only after an approved Discord user clicked "Godkänn köp" on exactly
- * this prepared session, inside the approval window -- see requestBookingApproval there.
+ * calls it, from exactly two places: after an approved Discord user clicked "Godkänn köp"
+ * on this prepared session inside the approval window, or -- with AUTO_BOOKING_UNATTENDED
+ * on -- straight after prepareBooking returned ok. Never from the scraper, never from a
+ * route, and never from `npm run book`, whatever the settings say.
  */
 export async function pressBetala(prepared: PreparedBooking): Promise<DryRunResult> {
   const { page, watch } = prepared;

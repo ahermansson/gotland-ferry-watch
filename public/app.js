@@ -554,7 +554,7 @@ function renderSettings(settings, { fillInputs }) {
   // off, "dygnet runt" is already what everything does.
   const aroundClock =
     settings.aroundTheClock && activeFrom !== activeTo
-      ? " Bevakningar med autobokning kollas dygnet runt — de väcker ingen."
+      ? " Bevakningar som köper helt på egen hand kollas dygnet runt — de väcker ingen."
       : "";
   settingsStatus.textContent = settings.idle
     ? `Inget kollas just nu. Slå på en bevakning eller lägg till en ny, så körs kontrollerna` +
