@@ -166,13 +166,35 @@ V1 supports one-way trips, adults (Vuxen 26+ år) only, and no vehicle / car und
 car over 2,25 m. Other passenger categories and vehicle types exist on the site but aren't
 exposed yet.
 
+## How the page stays current
+
+There is no polling. The server holds an open stream at `GET /api/events` and writes a
+line when something changes; the page listens with `EventSource` and fetches the endpoint
+that changed. What is sent is a nudge with no body — `/api/watches` and `/api/settings`
+stay the only definition of what a watch or the schedule looks like, so there is no second
+copy to drift.
+
+It is worth this little code because server-side state changes in only four moments: a
+cycle starting, a check finishing, the next cycle being scheduled, and a purchase being
+approved in Discord. That last one is the reason the rule is not simply "after a check" —
+it happens minutes later, when somebody presses a button, and without it the page would go
+on saying "Ledig plats!" about a trip that is already bought. Everything else a page shows,
+that page changed itself and already knows; the broadcast on add, delete and pause is
+there for the *other* tab, on the phone or the laptop.
+
+A dropped stream is not silent: the page says so under the countdown while it is down.
+`EventSource` reconnects on its own, and every reconnect resyncs — whatever changed while
+it was down was never sent, so re-fetching is the only way to be sure. `src/events.ts`
+sends a heartbeat comment every 25 seconds, because an idle connection and a dead one look
+identical to everything in between.
+
 ## Check interval
 
 The **Kontrollintervall** card at the bottom of the web UI sets how often the watches are
 checked: a base interval in minutes plus a random jitter added on top, so `5` + `3` means
 a check every 5–8 minutes. It also shows when the next check is due.
 
-A countdown at the top of the page shows how long until the next cycle starts — a cycle
+A countdown at the top of the page ticks locally — that is rendering, not traffic — and shows how long until the next cycle starts — a cycle
 checks every active watch in turn, so once more than one watch is active there is no
 single "next check" to count down to. Outside the window it shows the clock time the next
 cycle starts instead, since that wait is hours rather than minutes.

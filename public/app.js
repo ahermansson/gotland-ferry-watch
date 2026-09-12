@@ -7,6 +7,7 @@ const settingsStatus = document.querySelector("#settings-status");
 const countdownEl = document.querySelector("#countdown");
 const countdownLabel = document.querySelector("#countdown-label");
 const countdownProgressFill = document.querySelector("#countdown-progress-fill");
+const streamStatus = document.querySelector("#stream-status");
 const newWatchDialog = document.querySelector("#new-watch-dialog");
 const settingsDialog = document.querySelector("#settings-dialog");
 
@@ -599,7 +600,38 @@ loadOptions().then(() => {
 });
 loadSettings({ fillInputs: true });
 renderCountdown();
+// Local rendering, not traffic: the countdown ticks on its own between changes.
 setInterval(renderCountdown, 1000);
-setInterval(loadWatches, 15_000);
-// Keep the "next check" line honest without clobbering a value being typed.
-setInterval(() => loadSettings({ fillInputs: false }), 15_000);
+
+/**
+ * The server says when something changed, so there is no timer asking. It changes on its
+ * own in only a few moments -- a cycle starting, a check finishing, the next cycle being
+ * scheduled, a purchase approved in Discord -- and everything else on this page, this page
+ * did itself and already knows about.
+ *
+ * The message is a nudge with no body: what a watch or the schedule looks like is still
+ * defined in one place, by the endpoints these handlers call.
+ */
+function listenForChanges() {
+  const stream = new EventSource("/api/events");
+
+  stream.addEventListener("watches", () => loadWatches());
+  // fillInputs stays false: the settings dialog may be open with a half-typed interval.
+  stream.addEventListener("scheduler", () => loadSettings({ fillInputs: false }));
+
+  // Reconnects happen -- a laptop lid, a sleeping phone -- and whatever changed while the
+  // stream was down was never sent. So every open resyncs, not just the first.
+  stream.addEventListener("open", () => {
+    streamStatus.hidden = true;
+    loadWatches();
+    loadSettings({ fillInputs: false });
+  });
+
+  // EventSource retries on its own; this only makes the gap visible rather than leaving
+  // the page silently frozen on whatever it last knew.
+  stream.addEventListener("error", () => {
+    streamStatus.hidden = false;
+  });
+}
+
+listenForChanges();

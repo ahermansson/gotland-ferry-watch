@@ -7,6 +7,7 @@ import {
   recordCheckResult,
   setActive,
 } from "./db.js";
+import { broadcast } from "./events.js";
 import { report, resetReportThrottle, sendDiscordNotification } from "./notifier.js";
 import { requestBookingApproval } from "./purchase.js";
 import { checkAvailability, isBookable } from "./scraper.js";
@@ -24,10 +25,15 @@ let scraping = false;
 function withCheckLock<T>(run: () => Promise<T>): Promise<T> {
   const result = checkLock.then(async () => {
     scraping = true;
+    // The card says "Kollar…" from this flag, so the page is told when it moves -- both
+    // ways. Without the second one a finished check leaves the spinner running until
+    // something else happens to broadcast.
+    broadcast("scheduler");
     try {
       return await run();
     } finally {
       scraping = false;
+      broadcast("scheduler");
     }
   });
   // Queue on a chain that always settles, so one failed check doesn't strand the rest.
@@ -42,6 +48,8 @@ export async function runSingleCheck(watchId: string): Promise<CheckResult | und
   // The notification stays outside the lock — a slow webhook shouldn't hold up a check.
   const result = await withCheckLock(() => checkAvailability(watch));
   recordCheckResult(watch.id, result.status, result.detail);
+  // The one change the pages cannot know about on their own.
+  broadcast("watches");
 
   if (result.status === "available" && watch.booking.autoBook) {
     const approval = await requestBookingApproval(watch);
@@ -75,6 +83,7 @@ export async function runSingleCheck(watchId: string): Promise<CheckResult | und
     if (delivered) {
       markNotified(watch.id);
       setActive(watch.id, false);
+      broadcast("watches");
       console.log(`  ${watch.label}: notified, watch deactivated.`);
     } else {
       // Nowhere to report this: the webhook is what failed. The console is the only
@@ -178,6 +187,7 @@ export async function runCycle(): Promise<CycleOutcome> {
       setActive(watch.id, false);
       console.log(`  ${watch.label}: departure ${watch.date} ${watch.departureTime} has passed, deactivated.`);
     }
+    if (departed.length) broadcast("watches");
 
     const watches = active.filter((w) => !hasDeparted(w));
     console.log(`Checking ${watches.length} active watch(es)...`);
@@ -289,6 +299,7 @@ function scheduleNext(): void {
     paused = false;
     nextCheckAt = null;
     timer = undefined;
+    broadcast("scheduler");
     console.log("No active watch — idle until one is added or switched back on.");
     return;
   }
@@ -314,6 +325,7 @@ function scheduleNext(): void {
 
   const at = new Date(now.getTime() + delay);
   nextCheckAt = at.toISOString();
+  broadcast("scheduler");
   console.log(`Next check at ${at.toLocaleString("sv-SE")}${note}.`);
   timer = setTimeout(tick, delay);
   timer.unref?.();

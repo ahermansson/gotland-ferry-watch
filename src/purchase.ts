@@ -19,6 +19,7 @@ import {
   type Message,
 } from "discord.js";
 import { recordCheckResult, setActive } from "./db.js";
+import { broadcast } from "./events.js";
 import { report } from "./notifier.js";
 import { pressBetala, prepareBooking, type PreparedBooking } from "./booking.js";
 import type { Watch } from "./types.js";
@@ -124,6 +125,9 @@ async function handleButton(interaction: ButtonInteraction): Promise<void> {
     if (result.ok) {
       recordCheckResult(watchId, "booked", result.detail);
       setActive(watchId, false);
+      // Not after a check: minutes later, when somebody pressed a button in Discord. Left
+      // out, the page keeps saying "Ledig plats!" about a trip that is already bought.
+      broadcast("watches");
       await interaction.followUp(`✅ Köpt, godkänt av ${interaction.user.username}. ${result.detail}`);
     } else {
       await interaction.followUp(`⚠️ Betala klickades men flödet rapporterade ett problem: ${result.detail}`);

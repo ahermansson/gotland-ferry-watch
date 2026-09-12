@@ -617,3 +617,9 @@ td small { color: #666; }
   white-space: nowrap;
   border: 0;
 }
+
+/* Said only while it is true: the stream is down and the page is showing what it last
+   knew. EventSource is retrying on its own, so this is a notice, not an error. */
+.stream-trouble {
+  color: #b7791f;
+}

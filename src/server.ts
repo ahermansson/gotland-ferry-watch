@@ -9,6 +9,7 @@ import {
   saveSettings,
   setActive,
 } from "./db.js";
+import { addClient, broadcast } from "./events.js";
 import { getSchedulerState, rescheduleNow, runSingleCheck, startCycleNow } from "./scheduler.js";
 import {
   BOOKABLE_SALONGS,
@@ -87,6 +88,24 @@ export function createServer() {
   app.use(cors());
   app.use(express.json());
   app.use(express.static(path.resolve("public")));
+
+  /**
+   * The stream the pages listen to. It answers nothing and never ends: the body is left
+   * open and written to when something changes. `X-Accel-Buffering` is for the day this
+   * sits behind nginx, which otherwise buffers the stream into silence.
+   */
+  app.get("/api/events", (_req, res) => {
+    res.writeHead(200, {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache, no-transform",
+      Connection: "keep-alive",
+      "X-Accel-Buffering": "no",
+    });
+    // A first byte now, so the browser fires onopen instead of waiting for the first
+    // change -- which, on a quiet evening, is how long a "connecting" state would last.
+    res.write(": hello\n\n");
+    addClient(res);
+  });
 
   app.get("/api/options", (_req, res) => {
     res.json({
@@ -198,6 +217,7 @@ export function createServer() {
     // Adding a watch is the one action that earns a check straight away, rather than just
     // waking the idle scheduler and waiting out an interval to find out.
     startCycleNow();
+    broadcast("watches");
     res.status(201).json(watch);
   });
 
@@ -218,6 +238,7 @@ export function createServer() {
 
     if (typeof body.active === "boolean") {
       setActive(req.params.id, body.active);
+      broadcast("watches");
       // Switching one on starts the timer; switching the last one off stops it, so the
       // page stops counting down to a cycle that would have nothing to check.
       rescheduleNow();
@@ -227,6 +248,7 @@ export function createServer() {
 
   app.delete("/api/watches/:id", (req, res) => {
     deleteWatch(req.params.id);
+    broadcast("watches");
     // Deleting the last active watch idles the scheduler, same as switching it off.
     rescheduleNow();
     res.status(204).end();
