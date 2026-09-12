@@ -28,19 +28,9 @@ let bookingDefaults = null;
  * 15 s, so without this the button springs back to "Kolla nu" mid-check and the check
  * looks like it never ran. */
 const checking = new Set();
-/**
- * Watches whose Auto switch is ticked but NOT saved. Ticking it only opens the panel --
- * turning auto-booking on needs a price cap and at least one fare and lounge, which an
- * untouched panel hasn't got -- so the switch alone is an intent, not a setting. Held here
- * so the 15 s redraw neither silently unticks it nor lets it read as saved: the row says
- * "ej sparad" for exactly as long as that is true.
- */
-const pendingAuto = new Set();
-
 // Inline so a row costs no extra request, and stroke-drawn so they take the button's own
 // colour on hover and when disabled.
 const ICON_RUN = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="23 4 23 10 17 10" /><polyline points="1 20 1 14 7 14" /><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" /></svg>`;
-const ICON_PREFS = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="4" y1="21" x2="4" y2="14" /><line x1="4" y1="10" x2="4" y2="3" /><line x1="12" y1="21" x2="12" y2="12" /><line x1="12" y1="8" x2="12" y2="3" /><line x1="20" y1="21" x2="20" y2="16" /><line x1="20" y1="12" x2="20" y2="3" /><line x1="1" y1="14" x2="7" y2="14" /><line x1="9" y1="8" x2="15" y2="8" /><line x1="17" y1="16" x2="23" y2="16" /></svg>`;
 const ICON_DELETE = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /><line x1="10" y1="11" x2="10" y2="17" /><line x1="14" y1="11" x2="14" y2="17" /></svg>`;
 
 async function loadOptions() {
@@ -177,7 +167,14 @@ function renderWatches(watches) {
   }
 }
 
-/** The three rows a watch owns: the watch itself, its Auto summary, its booking panel. */
+/**
+ * The two rows a watch owns: the watch itself, and -- only when it auto-books -- a line
+ * saying so. There is no editor here. What a watch is allowed to buy is decided when it
+ * is created and never again: an auto-booking that can be switched off from a table is
+ * one that can be switched off by a mis-tap, and switching it off silently is the same
+ * outcome as the bug this whole branch started with. Changed your mind: delete the watch
+ * and add it again.
+ */
 function createWatchRows(w) {
   const tr = document.createElement("tr");
   tr.className = "watch-row";
@@ -195,35 +192,12 @@ function createWatchRows(w) {
     `;
   tbody.appendChild(tr);
 
-  // Always visible, unlike the editable panel below it — this is what makes an
-  // auto-booked watch's settings show up on the row itself, not just after a click.
   const summary = document.createElement("tr");
   summary.className = "auto-summary-row";
   summary.dataset.watch = w.id;
-  summary.innerHTML = `<td colspan="4">
-      <div class="auto-summary">
-        <label class="toggle">
-          <input type="checkbox" data-action="auto" data-id="${w.id}" />
-          <span class="toggle-track"></span>
-        </label>
-        <span class="auto-summary-text"></span>
-      </div>
-    </td>`;
+  summary.hidden = !w.booking?.autoBook;
+  summary.innerHTML = `<td colspan="4"><span class="auto-summary-text"></span></td>`;
   tbody.appendChild(summary);
-
-  // Hidden rather than absent, so opening the panel costs no round trip. Its contents are
-  // written here and never again: see renderWatches.
-  const panel = document.createElement("tr");
-  panel.className = "prefs-row";
-  panel.dataset.watch = w.id;
-  panel.dataset.prefsFor = w.id;
-  panel.hidden = true;
-  panel.innerHTML = `<td colspan="4">${renderBookingPrefs(w.booking)}
-      <div class="prefs-actions">
-        <button type="button" data-action="save-prefs" data-id="${w.id}">Spara</button>
-        <span class="error" data-prefs-error="${w.id}"></span>
-      </div></td>`;
-  tbody.appendChild(panel);
 }
 
 /** Everything on a watch's rows that the server decides. The panel is not in this list. */
@@ -250,15 +224,13 @@ function updateWatchRow(w) {
           label: checking.has(w.id) ? "Kollar…" : "Kör nu",
           busy: checking.has(w.id),
         })}
-        ${iconButton({ action: "prefs", id: w.id, icon: ICON_PREFS, label: "Bokningsinställningar" })}
         ${iconButton({ action: "delete", id: w.id, icon: ICON_DELETE, label: "Ta bort", danger: true })}`;
 
-  // A ticked-but-unsaved Auto switch is the user's, not the server's: leave both the
-  // switch and the line alone until a save settles which of the two is right.
-  if (pendingAuto.has(w.id)) return;
-  const autoBox = tbody.querySelector(`input[data-action="auto"][data-id="${w.id}"]`);
-  if (autoBox && autoBox.checked !== !!w.booking?.autoBook) autoBox.checked = !!w.booking?.autoBook;
-  paintAutoSummary(w.id, w.booking);
+  const summary = tbody.querySelector(`tr.auto-summary-row[data-watch="${w.id}"]`);
+  if (summary) {
+    summary.hidden = !w.booking?.autoBook;
+    summary.querySelector(".auto-summary-text").innerHTML = describeBookingPrefs(w.booking);
+  }
 }
 
 function iconButton({ action, id, icon, label, busy = false, danger = false }) {
@@ -281,31 +253,11 @@ function statusIndicator(status, detail) {
   return `<span class="status-dot status-${status}" title="${escapeHtml(title)}" aria-label="${escapeHtml(title)}"></span>`;
 }
 
-/**
- * Repaints one watch's Auto summary without a redraw. loadWatches() regenerates the panel
- * from the SAVED prefs, so calling it here would throw away the half-filled form that is
- * the whole reason the switch is pending.
- */
-function paintAutoSummary(id, saved) {
-  const box = tbody.querySelector(`input[data-action="auto"][data-id="${id}"]`);
-  const text = box?.closest(".auto-summary")?.querySelector(".auto-summary-text");
-  if (!text) return;
-  if (pendingAuto.has(id)) {
-    text.textContent = "Ej sparad — fyll i nedan och tryck Spara för att slå på";
-    text.classList.add("unsaved");
-    return;
-  }
-  text.classList.remove("unsaved");
-  // `saved` is what the server just accepted. Without it the line would keep describing
-  // the old settings until the 15 s redraw -- which is how switching Auto off left "🤖
-  // Auto: ..." sitting on the row for a quarter of a minute after it stopped being true.
-  if (saved) text.innerHTML = describeBookingPrefs(saved);
-}
-
-/** The one-line summary shown on every watch row, so auto-booking settings don't hide
- * behind a click. Off gets a plain "av" — nothing configured is worth summarizing then. */
+/** What the watch is allowed to buy, for the line under an auto-booking watch. A watch
+ * that does not auto-book has no line: "Autoboka: av" was a setting you could go and
+ * change, and now it is just noise on every ordinary row. */
 function describeBookingPrefs(booking) {
-  if (!booking?.autoBook) return "Autoboka: av";
+  if (!booking?.autoBook) return "";
   const fares = booking.fareOrder?.length ? booking.fareOrder.join(" → ") : "ingen biljettklass vald";
   const salongs = booking.salongs?.length ? booking.salongs.join(", ") : "ingen salong vald";
   const price = booking.maxPrice != null ? `max ${booking.maxPrice} kr` : "inget takpris";
@@ -407,45 +359,8 @@ tbody.addEventListener("click", async (e) => {
   if (action === "delete") {
     if (!confirm("Ta bort denna bevakning?")) return;
     await fetch(`/api/watches/${id}`, { method: "DELETE" });
-    pendingAuto.delete(id);
     await loadWatches();
     await loadSettings({ fillInputs: false });
-  } else if (action === "prefs") {
-    const panel = tbody.querySelector(`[data-prefs-for="${id}"]`);
-    panel.hidden = !panel.hidden;
-  } else if (action === "save-prefs") {
-    const panel = tbody.querySelector(`[data-prefs-for="${id}"]`);
-    const errorEl = panel.querySelector(`[data-prefs-error="${id}"]`);
-    const autoBox = tbody.querySelector(`input[data-action="auto"][data-id="${id}"]`);
-    errorEl.textContent = "";
-    errorEl.classList.remove("ok");
-    const res = await fetch(`/api/watches/${id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ booking: readBookingPrefs(panel, autoBox.checked) }),
-    });
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({}));
-      errorEl.textContent = body.error ?? `HTTP ${res.status}`;
-      // Nothing was saved. The box stays ticked -- it is what you asked for, and the row
-      // already says "ej sparad" -- while the error says what is missing. Unticking it
-      // here would answer a failed save by quietly discarding the intent instead.
-      if (autoBox.checked) pendingAuto.add(id);
-      paintAutoSummary(id);
-      return;
-    }
-    // Saved: whatever the server now holds is the truth about this watch.
-    pendingAuto.delete(id);
-    // Left open on purpose: you just set this, and closing it here would fold the panel
-    // away before you've had a chance to see what got saved.
-    await loadWatches();
-    // The panel is no longer rebuilt by a load, so this is the same element throughout.
-    errorEl.textContent = "Sparat.";
-    errorEl.classList.add("ok");
-    setTimeout(() => {
-      errorEl.classList.remove("ok");
-      if (errorEl.textContent === "Sparat.") errorEl.textContent = "";
-    }, 2000);
   } else if (action === "check") {
     checking.add(id);
     await loadWatches();
@@ -463,42 +378,6 @@ tbody.addEventListener("click", async (e) => {
 });
 
 tbody.addEventListener("change", async (e) => {
-  const auto = e.target.closest("input[data-action='auto']");
-  if (auto) {
-    const panel = tbody.querySelector(`[data-prefs-for="${auto.dataset.id}"]`);
-
-    // Turning it on needs a price cap and at least one fare/lounge first, which an
-    // untouched panel won't have — open it for editing instead of firing off a save
-    // that's only going to be refused. "Spara" in the panel is what actually turns it on.
-    if (auto.checked) {
-      panel.hidden = false;
-      // Left ticked: it shows intent, and "Spara" below reads this same checkbox to
-      // decide what to save. Nothing is persisted until that click succeeds -- which is
-      // what the row now says, in words, instead of leaving a ticked switch to imply
-      // otherwise until the next redraw silently unticked it.
-      pendingAuto.add(auto.dataset.id);
-      paintAutoSummary(auto.dataset.id);
-      const errorEl = panel.querySelector(`[data-prefs-error="${auto.dataset.id}"]`);
-      if (errorEl) errorEl.textContent = "Autobokning slås på när du trycker Spara.";
-      return;
-    }
-
-    pendingAuto.delete(auto.dataset.id);
-    const off = readBookingPrefs(panel, false);
-    const res = await fetch(`/api/watches/${auto.dataset.id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ booking: off }),
-    });
-    if (res.ok) paintAutoSummary(auto.dataset.id, off);
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({}));
-      panel.hidden = false;
-      panel.querySelector(`[data-prefs-error="${auto.dataset.id}"]`).textContent = body.error ?? `HTTP ${res.status}`;
-    }
-    return;
-  }
-
   const input = e.target.closest("input[data-action='toggle']");
   if (!input) return;
   await fetch(`/api/watches/${input.dataset.id}`, {

@@ -273,25 +273,6 @@ export function recordCheckResult(id: string, status: WatchStatus, detail: strin
  * Stamps the watch as notified. Only a delivered notification may set this — it is what
  * tells the next check that the search is done, so a failed webhook has to leave it null.
  */
-/**
- * Updates the booking settings of one watch. Everything is replaced together, so a
- * half-saved form cannot leave a watch allowed to buy a fare class nobody ticked.
- */
-export function saveBookingPrefs(id: string, prefs: BookingPrefs): void {
-  db.prepare(
-    `UPDATE watches
-        SET auto_book = ?, fare_order = ?, salongs = ?, max_price = ?, seat_reservation = ?
-      WHERE id = ?`
-  ).run(
-    prefs.autoBook ? 1 : 0,
-    prefs.fareOrder.join(","),
-    prefs.salongs.join(","),
-    prefs.maxPrice,
-    prefs.seatReservation ? 1 : 0,
-    id
-  );
-}
-
 /** Remembers which single leg was last reported, so the same half trip isn't re-announced. */
 export function markPartialNotified(id: string, leg: TripLeg | null): void {
   db.prepare("UPDATE watches SET partial_notified_leg = ? WHERE id = ?").run(leg, id);

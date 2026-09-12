@@ -466,41 +466,17 @@ td small { color: #666; }
   margin-bottom: 0.75rem;
 }
 
-/* The panel is a row of its own under the watch it belongs to. */
-.prefs-row > td {
-  background: #f7f9fb;
-  padding: 1rem;
-}
-
-.prefs-actions {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-}
-
-/* Always-visible row between a watch and its (hidden until edited) settings panel. */
+/* The line under a watch that auto-books, saying what it is allowed to buy. Read-only:
+   it is a fact about the watch, decided when it was added, not a control. */
 .auto-summary-row > td {
-  padding: 0.35rem 0.5rem;
+  padding: 0.35rem 0.6rem 0.6rem;
   border-top: none;
-}
-
-.auto-summary {
-  display: flex;
-  align-items: center;
-  gap: 0.6rem;
   font-size: 0.85rem;
   color: #444;
 }
 
 .auto-summary-text {
   overflow-wrap: anywhere;
-}
-
-/* An Auto switch that is ticked but not saved. Amber rather than the muted grey of a
-   saved summary: it is a state that needs an action, not a fact about the watch. */
-.auto-summary-text.unsaved {
-  color: #b7791f;
-  font-weight: 600;
 }
 
 .toggle {

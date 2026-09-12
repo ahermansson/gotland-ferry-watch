@@ -48,7 +48,15 @@ cycle while the other leg opening still is.
 Each watch carries what an auto-booking would be allowed to buy: the fare classes in
 ranked order (the highest ranked one that can be booked wins), the lounges that will do
 (the cheapest permitted one is taken), a price cap for the whole trip, and whether to add
-the paid seat reservation. The **Auto** switch in the table turns it on for that watch.
+the paid seat reservation.
+
+**All of it is decided when the watch is added, and none of it can be changed afterwards.**
+Tick **Autoboka** in the add form and the settings appear under it; the watch then carries
+a line in the table saying what it is allowed to buy, and that line is a fact, not a
+control. There is no switch on the row and `PATCH /api/watches/:id` refuses a `booking`
+body — an auto-booking that can be turned off from a table is one that can be turned off by
+a mis-tap, and an auto-booking that is silently off is the failure this whole flow exists to
+prevent. Changed your mind: delete the watch and add it again.
 
 When a watch with **Auto** on finds an available departure — and the global
 `AUTO_BOOKING_ENABLED` switch is also on — the scheduler drives the real flow: login, fare

@@ -6,7 +6,6 @@ import {
   deleteWatch,
   getSettings,
   listWatches,
-  saveBookingPrefs,
   saveSettings,
   setActive,
 } from "./db.js";
@@ -199,17 +198,19 @@ export function createServer() {
     res.status(201).json(watch);
   });
 
+  /**
+   * Pausing a watch is the only thing that can be changed after it is created. What it is
+   * allowed to BUY is not: auto-booking is decided in the add form, and a watch that
+   * should buy something else is a new watch. A booking editor on a live row is a mis-tap
+   * away from an auto-booking that is silently off -- which is the failure this branch
+   * exists to close, not one to leave a second door open for.
+   */
   app.patch("/api/watches/:id", (req, res) => {
     const body = req.body as { active?: boolean; booking?: unknown };
 
     if (body.booking !== undefined) {
-      const errors: string[] = [];
-      const prefs = parseBookingPrefs(body.booking, errors);
-      if (errors.length) {
-        res.status(400).json({ error: errors.join(", ") });
-        return;
-      }
-      saveBookingPrefs(req.params.id, prefs);
+      res.status(400).json({ error: "bokningsinställningar bestäms när bevakningen skapas" });
+      return;
     }
 
     if (typeof body.active === "boolean") {
