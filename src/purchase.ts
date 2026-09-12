@@ -19,6 +19,7 @@ import {
   type Message,
 } from "discord.js";
 import { recordCheckResult, setActive } from "./db.js";
+import { report } from "./notifier.js";
 import { pressBetala, prepareBooking, type PreparedBooking } from "./booking.js";
 import type { Watch } from "./types.js";
 
@@ -52,17 +53,43 @@ export function autoBookingEnabled(): boolean {
 export async function startApprovalBot(): Promise<void> {
   const token = process.env.DISCORD_BOT_TOKEN;
   if (!token) {
-    console.warn(
-      "DISCORD_BOT_TOKEN saknas -- auto-bokning kan inte begära godkännande och kommer aldrig köpa något."
+    // Reported through the webhook rather than logged: the bot is precisely what is
+    // missing, so it cannot announce its own absence, and every auto-booking from here on
+    // will decline for this reason.
+    await report(
+      "warn",
+      "**DISCORD_BOT_TOKEN saknas** — autobokning kan inte begära godkännande och kommer aldrig köpa något.",
+      { repeatAfterMinutes: 0 }
     );
     return;
   }
-  client = new Client({ intents: [GatewayIntentBits.Guilds] });
-  client.on("interactionCreate", (interaction) => {
+  const bot = new Client({ intents: [GatewayIntentBits.Guilds] });
+  bot.on("interactionCreate", (interaction) => {
     if (interaction.isButton()) void handleButton(interaction);
   });
-  client.once("clientReady", () => console.log("Discord-godkännandebot ansluten."));
-  await client.login(token);
+  // A dropped gateway connection leaves `client` set but unusable, so the next approval
+  // fails on the channel fetch with a misleading reason. Say what actually happened.
+  bot.on("error", (error) => void report("error", `**Discord-boten tappade anslutningen** — ${error.message}`, {
+    key: "bot-error",
+  }));
+  bot.once("clientReady", () => void report("info", "Discord-godkännandebot ansluten.", { repeatAfterMinutes: 0 }));
+
+  try {
+    await bot.login(token);
+  } catch (error) {
+    // Only assigned on a successful login. Set before it, `client` is truthy while the
+    // bot is unusable, and requestBookingApproval's "är inte ansluten" check passes when
+    // it should be the thing that stops the attempt.
+    await report(
+      "error",
+      `**Discord-boten kunde inte logga in** — autobokning är avstängd i praktiken.\n${
+        error instanceof Error ? error.message : String(error)
+      }`,
+      { repeatAfterMinutes: 0 }
+    );
+    return;
+  }
+  client = bot;
 }
 
 async function handleButton(interaction: ButtonInteraction): Promise<void> {
@@ -122,7 +149,10 @@ async function expire(watchId: string): Promise<void> {
     await entry.message.edit({ components: [] });
     await entry.message.reply("⏱️ Ingen godkände i tid -- sessionen släpptes. Bevakningen fortsätter.");
   } catch {
-    /* the message or channel may be gone by now */
+    // The reply is the notice; if the message or channel is gone, the webhook still is.
+    await report("warn", `**Godkännandet gick ut** — ${watchId}. Sessionen släpptes, bevakningen fortsätter.`, {
+      repeatAfterMinutes: 0,
+    });
   }
 }
 

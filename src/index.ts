@@ -1,4 +1,5 @@
 import "dotenv/config";
+import { report } from "./notifier.js";
 import { startApprovalBot } from "./purchase.js";
 import { createServer } from "./server.js";
 import { startScheduler } from "./scheduler.js";
@@ -11,4 +12,10 @@ app.listen(port, () => {
 });
 
 startScheduler();
-void startApprovalBot();
+// startApprovalBot reports its own failures, but a throw on the way there would otherwise
+// be an unhandled rejection -- and auto-booking would be off with nothing said anywhere.
+void startApprovalBot().catch((error) =>
+  report("error", `**Godkännandeboten startade inte**\n${error instanceof Error ? error.message : String(error)}`, {
+    repeatAfterMinutes: 0,
+  })
+);

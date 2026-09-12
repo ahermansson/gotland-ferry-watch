@@ -66,6 +66,26 @@ the same flow manually for testing and always closes the session unpressed — t
 flag that makes it press Betala. A price cap is required before a watch's Auto switch can
 be turned on at all: it is the one limit that still holds when everything else misreads.
 
+## What it reports, and where
+
+Two kinds of message go to Discord, and they are not the same thing.
+
+A **notification** is the point of the watch: a seat opened, or a booking is prepared and
+waiting for a click. It leads with `DISCORD_MENTION` so it reaches your phone.
+
+A **report** is the app saying what it just did — and above all what it declined to do.
+Auto-booking that didn't run and why, a check that crashed, a cycle where every check
+failed and the interval is backing off, the approval bot failing to connect. These used to
+be `console.warn` lines in a terminal nobody is looking at, which meant a watch that found
+a seat and did not book it looked exactly like a watch that never got the chance. Reports
+never mention anyone, and go to `DISCORD_LOG_WEBHOOK_URL` when it is set — otherwise to
+the same webhook as the notifications.
+
+`report()` in `src/notifier.ts` is the only way one is sent, and it always writes the
+console line too, so the terminal stays the complete record. Repeats are throttled per
+condition (one message an hour per watch and reason, so a single broken watch can't bury
+the channel) and the throttle clears the moment the checks recover.
+
 ## Lounge priority
 
 Lounges are grouped into tiers, shown in notifications as:

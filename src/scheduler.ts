@@ -7,7 +7,7 @@ import {
   recordCheckResult,
   setActive,
 } from "./db.js";
-import { sendDiscordNotification } from "./notifier.js";
+import { report, resetReportThrottle, sendDiscordNotification } from "./notifier.js";
 import { requestBookingApproval } from "./purchase.js";
 import { checkAvailability, isBookable } from "./scraper.js";
 import { VEHICLE_LABELS, type CheckResult, type TripLeg, type Watch } from "./types.js";
@@ -51,7 +51,13 @@ export async function runSingleCheck(watchId: string): Promise<CheckResult | und
     }
     // Auto-booking wanted this but couldn't get there (bot down, Reskort not offered,
     // over budget, ...) -- fall through to the plain notification so it isn't silent.
-    console.warn(`  ${watch.label}: auto-booking did not run (${approval.detail}) -- notifying instead.`);
+    // The reason is reported, not just logged: the watch found a seat and did not buy it,
+    // which is the one outcome that looks identical to "nothing happened" from Discord.
+    await report(
+      "warn",
+      `**Autobokning kördes inte** — ${watch.label}\n${approval.detail}\nSkickar vanlig notis i stället.`,
+      { key: `autobook:${watch.id}` }
+    );
   }
 
   // What decides this is whether a notification has landed, not how the status moved. A
@@ -71,6 +77,8 @@ export async function runSingleCheck(watchId: string): Promise<CheckResult | und
       setActive(watch.id, false);
       console.log(`  ${watch.label}: notified, watch deactivated.`);
     } else {
+      // Nowhere to report this: the webhook is what failed. The console is the only
+      // record, and the watch stays active so the next check tries again.
       console.warn(`  ${watch.label}: notification failed, keeping the watch active.`);
     }
   } else {
@@ -181,7 +189,13 @@ export async function runCycle(): Promise<CycleOutcome> {
         console.log(`  ${watch.label}: ${result?.status ?? "error"}`);
         if (!result || result.status === "unknown") failures++;
       } catch (error) {
-        console.error(`  ${watch.label}: check threw`, error);
+        // A throw here is not an ordinary failed check -- it is the check never finishing,
+        // which is how a watch can go quiet for hours without a single message.
+        await report(
+          "error",
+          `**Kontrollen kraschade** — ${watch.label}\n${error instanceof Error ? error.message : String(error)}`,
+          { key: `check-threw:${watch.id}` }
+        );
         failures++;
       }
       // The jitter spaces the cycles apart; without this the checks inside one cycle
@@ -315,10 +329,31 @@ async function tick(): Promise<void> {
 
   try {
     const outcome = await runCycle();
-    consecutiveFailures = outcome.failed ? consecutiveFailures + 1 : 0;
+    if (outcome.failed) {
+      consecutiveFailures++;
+      // Every check in the cycle failed. Once is a blip; repeatedly is the scraper being
+      // broken or the site pushing back, and the backoff then makes the silence longer.
+      await report(
+        "error",
+        `**Alla kontroller misslyckades** (${consecutiveFailures} cykel(er) i rad) — ` +
+          `intervallet förlängs ${Math.min(2 ** consecutiveFailures, MAX_BACKOFF_FACTOR)}×.`,
+        { key: "cycle-failed" }
+      );
+    } else {
+      if (consecutiveFailures > 0) {
+        await report("info", `Kontrollerna fungerar igen efter ${consecutiveFailures} misslyckad(e) cykel(er).`, {
+          key: "cycle-recovered",
+          repeatAfterMinutes: 0,
+        });
+        resetReportThrottle();
+      }
+      consecutiveFailures = 0;
+    }
   } catch (error) {
-    console.error("Check cycle threw:", error);
     consecutiveFailures++;
+    await report("error", `**Kontrollcykeln kraschade**\n${error instanceof Error ? error.message : String(error)}`, {
+      key: "cycle-threw",
+    });
   }
   scheduleNext();
 }

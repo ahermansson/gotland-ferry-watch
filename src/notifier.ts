@@ -53,3 +53,89 @@ export async function sendDiscordNotification(message: string): Promise<boolean>
     return false;
   }
 }
+
+/**
+ * Operational reporting -- the second thing this file sends, and a different kind of
+ * message from a notification. A notification is the point of the watch; a report is the
+ * app saying what it just did or failed to do, so a silent failure cannot stay silent.
+ *
+ * It exists because every reason auto-booking declines to run was a `console.warn` in a
+ * terminal nobody is looking at: from the outside a watch that found a seat and did not
+ * book it was indistinguishable from one that never got the chance.
+ *
+ * `report()` is the ONE way out, the same rule sendDiscordNotification follows for
+ * notifications: it always writes the console line too, so the terminal stays the full
+ * record and the two can never disagree about what happened.
+ */
+export type ReportLevel = "info" | "warn" | "error";
+
+const LEVEL_MARK: Record<ReportLevel, string> = { info: "ℹ️", warn: "⚠️", error: "❌" };
+
+/** Last time a given key was posted, so a repeating condition doesn't repeat every cycle. */
+const lastReported = new Map<string, number>();
+
+/**
+ * How long the same key stays quiet after being posted. A failing check repeats every
+ * 10-15 minutes for as long as it is broken, and an hourly reminder says everything a
+ * per-cycle one does without burying the notification the channel exists for.
+ */
+const DEFAULT_REPEAT_MINUTES = 60;
+
+/** Reports go to their own webhook when one is set, so ops noise can live in its own channel. */
+function reportWebhookUrl(): string | undefined {
+  return process.env.DISCORD_LOG_WEBHOOK_URL || process.env.DISCORD_WEBHOOK_URL;
+}
+
+export function resetReportThrottle(): void {
+  lastReported.clear();
+}
+
+/**
+ * Says what happened, in the console always and in Discord when it is worth a message.
+ *
+ * `key` is what the throttle counts as "the same thing" -- pass a stable one per watch and
+ * condition (`autobook:<id>`), so one broken watch reporting hourly doesn't silence a
+ * second watch breaking for another reason. Without a key the message text is the key.
+ * `repeatAfterMinutes: 0` turns the throttle off for events that are already rare.
+ *
+ * Never throws and never blocks the caller's real work: a report that cannot be delivered
+ * is still on the console, which is strictly more than this code did before.
+ */
+export async function report(
+  level: ReportLevel,
+  message: string,
+  options: { key?: string; repeatAfterMinutes?: number } = {}
+): Promise<boolean> {
+  const line = `${LEVEL_MARK[level]} ${message}`;
+  const toConsole = level === "error" ? console.error : level === "warn" ? console.warn : console.log;
+  toConsole(line);
+
+  const key = options.key ?? message;
+  const repeatAfter = (options.repeatAfterMinutes ?? DEFAULT_REPEAT_MINUTES) * 60_000;
+  const previous = lastReported.get(key);
+  if (previous !== undefined && repeatAfter > 0 && Date.now() - previous < repeatAfter) return false;
+
+  const webhookUrl = reportWebhookUrl();
+  if (!webhookUrl) return false;
+
+  try {
+    const res = await fetch(webhookUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      // Reports never ping. They are frequent enough to be a nuisance and none of them is
+      // the thing you asked to be woken for -- that is what a notification is.
+      body: JSON.stringify({ content: line, allowed_mentions: { parse: [] } }),
+    });
+    if (!res.ok) {
+      console.error(`Discord report failed (${res.status}): ${await res.text()}`);
+      return false;
+    }
+    // Stamped only on a delivered report, so a webhook outage doesn't start the quiet
+    // period for a condition Discord was never told about.
+    lastReported.set(key, Date.now());
+    return true;
+  } catch (error) {
+    console.error("Discord report threw:", error);
+    return false;
+  }
+}
