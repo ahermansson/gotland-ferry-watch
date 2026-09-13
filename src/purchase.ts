@@ -33,7 +33,7 @@ import {
 import { buildTripInvite } from "./calendar.js";
 import { recordCheckResult, setActive } from "./db.js";
 import { broadcast } from "./events.js";
-import { report } from "./notifier.js";
+import { report, setLogChannelSender } from "./notifier.js";
 import { pressBetala, prepareBooking, type PreparedBooking } from "./booking.js";
 import type { Watch } from "./types.js";
 
@@ -120,6 +120,24 @@ export async function startApprovalBot(): Promise<void> {
     return;
   }
   client = bot;
+  // Ops reports can now leave through the bot, into whatever channel DISCORD_LOG_CHANNEL_ID
+  // names -- a channel nobody has to create a webhook for. Registered only here, after a
+  // successful login: before it the bot cannot send, and report() falls back to the webhook,
+  // which is what carries the reports about this bot failing to start at all.
+  setLogChannelSender(async (line) => {
+    const logChannelId = process.env.DISCORD_LOG_CHANNEL_ID;
+    if (!logChannelId) return false;
+    const channel = await bot.channels.fetch(logChannelId).catch(() => null);
+    if (!channel || typeof (channel as SendableChannels).send !== "function") return false;
+    try {
+      // Reports never ping, the same rule the webhook path follows: they are frequent, and
+      // none of them is the thing you asked to be woken for.
+      await (channel as SendableChannels).send({ content: line, allowedMentions: { parse: [] } });
+      return true;
+    } catch {
+      return false;
+    }
+  });
 }
 
 async function handleButton(interaction: ButtonInteraction): Promise<void> {

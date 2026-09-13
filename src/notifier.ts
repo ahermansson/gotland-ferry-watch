@@ -86,6 +86,22 @@ function reportWebhookUrl(): string | undefined {
   return process.env.DISCORD_LOG_WEBHOOK_URL || process.env.DISCORD_WEBHOOK_URL;
 }
 
+/**
+ * The other way a report can leave: the approval bot posting into the channel named by
+ * DISCORD_LOG_CHANNEL_ID. A channel addressed by id needs no webhook created for it, the
+ * same way DISCORD_CHANNEL_ID already addresses the approval channel.
+ *
+ * Registered rather than imported. The bot lives in purchase.ts, which imports report()
+ * from here, so reaching back for it would close a cycle -- the same reason events.ts
+ * takes its snapshot source from server.ts instead of building one.
+ */
+type LogChannelSender = (line: string) => Promise<boolean>;
+let logChannelSend: LogChannelSender | null = null;
+
+export function setLogChannelSender(send: LogChannelSender | null): void {
+  logChannelSend = send;
+}
+
 export function resetReportThrottle(): void {
   lastReported.clear();
 }
@@ -114,6 +130,28 @@ export async function report(
   const repeatAfter = (options.repeatAfterMinutes ?? DEFAULT_REPEAT_MINUTES) * 60_000;
   const previous = lastReported.get(key);
   if (previous !== undefined && repeatAfter > 0 && Date.now() - previous < repeatAfter) return false;
+
+  // The bot first, when it is connected and a log channel is named; the webhook otherwise.
+  // The order matters more than it looks. Three of the reports in this project are the bot
+  // itself failing -- a missing token, a refused login, a dropped gateway -- and those are
+  // exactly the moments this sender is absent or answers false. They leave through the
+  // webhook as they always did, rather than being swallowed by the thing they are about.
+  // Wrapped, not trusted. This function is registered from outside, and the promise this
+  // file makes -- never throws, never blocks the caller's real work -- has to hold even
+  // when whoever registered it gets that wrong. A throw here would otherwise travel up
+  // into the scheduler tick that was only trying to say something had failed.
+  let sentToChannel = false;
+  if (logChannelSend) {
+    try {
+      sentToChannel = await logChannelSend(line);
+    } catch (error) {
+      console.error("Discord log channel threw:", error);
+    }
+  }
+  if (sentToChannel) {
+    lastReported.set(key, Date.now());
+    return true;
+  }
 
   const webhookUrl = reportWebhookUrl();
   if (!webhookUrl) return false;
