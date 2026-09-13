@@ -1,13 +1,42 @@
 :root {
   color-scheme: light;
   font-family: system-ui, sans-serif;
+
+  /* A warm, muted palette -- linen and clay rather than white and saturated orange. */
+  --bg: #f2ede3;
+  --card: #fdfbf7;
+  --card-shadow: rgba(54, 47, 38, 0.1);
+  --ink: #38312a;
+  --ink-muted: #6e6355;
+  --ink-faint: #978d7a;
+  --border: #e2d8c6;
+  --divider: #ece4d5;
+  --track: #ddd2bd;
+
+  --accent: #a8672e;
+  --accent-hover: #8f5726;
+  --accent-soft: #f1e4d1;
+
+  --moss: #5f7a52;
+  --moss-hover: #4e6743;
+
+  --rust: #9c4a3c;
+  --rust-soft: #f3e3dd;
+  --ochre: #b8863f;
+  --slate: #4c6b72;
 }
 
 body {
   margin: 0;
   padding: 2rem;
-  background: #f4f7fa;
-  color: #1a1a1a;
+  /* A faint woven/linen texture: two crossed diagonal hairlines, tiled small. Plain
+     gradients rather than an SVG filter -- feTurbulence-in-a-data-URI support is
+     inconsistent across browsers, and this renders identically everywhere. */
+  background-color: var(--bg);
+  background-image:
+    repeating-linear-gradient(45deg, rgba(56, 49, 42, 0.05) 0 1px, transparent 1px 7px),
+    repeating-linear-gradient(-45deg, rgba(56, 49, 42, 0.05) 0 1px, transparent 1px 7px);
+  color: var(--ink);
 }
 
 main {
@@ -17,11 +46,6 @@ main {
 
 h1 {
   margin-bottom: 0.25rem;
-}
-
-.subtitle {
-  color: #555;
-  margin-top: 0;
 }
 
 .page-header {
@@ -51,13 +75,15 @@ dialog {
   border: none;
   border-radius: 12px;
   padding: 1.5rem;
-  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.2);
+  background: var(--card);
+  color: var(--ink);
+  box-shadow: 0 8px 30px rgba(54, 47, 38, 0.25);
   max-width: 32rem;
   width: calc(100% - 2rem);
 }
 
 dialog::backdrop {
-  background: rgba(0, 0, 0, 0.35);
+  background: rgba(56, 49, 42, 0.4);
 }
 
 dialog h2 {
@@ -76,11 +102,11 @@ dialog form {
 }
 
 .card {
-  background: #fff;
+  background: var(--card);
   border-radius: 12px;
   padding: 1.5rem;
   margin-bottom: 1.5rem;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 1px 3px var(--card-shadow);
 }
 
 form label {
@@ -96,11 +122,11 @@ form select {
   box-sizing: border-box;
   padding: 0.5rem;
   margin-top: 0.25rem;
-  border: 1px solid #ccc;
+  border: 1px solid var(--border);
   border-radius: 6px;
   font-size: 1rem;
-  background: #fff;
-  color: #000;
+  background: var(--card);
+  color: var(--ink);
 }
 
 .row {
@@ -115,7 +141,8 @@ form select {
 }
 
 button {
-  background: #f5a623;
+  background: var(--accent);
+  color: #fff;
   border: none;
   border-radius: 6px;
   padding: 0.6rem 1.2rem;
@@ -123,8 +150,17 @@ button {
   cursor: pointer;
 }
 
+button:hover {
+  background: var(--accent-hover);
+}
+
 button.secondary {
-  background: #e5e5e5;
+  background: var(--border);
+  color: var(--ink);
+}
+
+button.secondary:hover {
+  background: var(--track);
 }
 
 table {
@@ -135,7 +171,7 @@ table {
 th, td {
   text-align: left;
   padding: 0.5rem;
-  border-bottom: 1px solid #eee;
+  border-bottom: 1px solid var(--divider);
   font-size: 0.9rem;
 }
 
@@ -152,10 +188,10 @@ td.actions {
   width: 2.1rem;
   height: 2.1rem;
   padding: 0;
-  background: #fff;
-  border: 1px solid #ddd;
+  background: var(--card);
+  border: 1px solid var(--border);
   border-radius: 6px;
-  color: #555;
+  color: var(--ink-muted);
   vertical-align: middle;
 }
 
@@ -169,15 +205,15 @@ td.actions {
 }
 
 .icon-btn:hover {
-  background: #f0f0f0;
-  color: #1a1a1a;
+  background: var(--accent-soft);
+  color: var(--ink);
 }
 
 /* Deleting is the one irreversible thing in the table, so the icon says so on the way in. */
 .icon-btn.danger:hover {
-  background: #fdecea;
-  border-color: #f0b7b2;
-  color: #b3261e;
+  background: var(--rust-soft);
+  border-color: #d9b2a8;
+  color: var(--rust);
 }
 
 .icon-btn:disabled {
@@ -224,45 +260,45 @@ td.actions {
 .status-unknown,
 .status-full {
   border-radius: 2px;
-  background: #b3261e;
+  background: var(--rust);
 }
 
 .status-unknown {
-  background: #9aa0a6;
+  background: var(--ink-faint);
 }
 
 .status-partial {
   border-radius: 2px;
-  background: #c9820a;
+  background: var(--ochre);
 }
 
 .status-available {
   border-radius: 50%;
-  background: #1a7f37;
+  background: var(--moss);
 }
 
 .status-booked {
   border-radius: 50%;
-  background: #1a56b3;
+  background: var(--slate);
 }
 
 .hint {
   font-size: 0.8rem;
-  color: #666;
+  color: var(--ink-muted);
   margin: 0 0 0.75rem;
 }
 
 .error {
-  color: #b3261e;
+  color: var(--rust);
   font-size: 0.85rem;
   margin-left: 0.75rem;
 }
 
 .error.ok {
-  color: #1e7d32;
+  color: var(--moss);
 }
 
-td small { color: #666; }
+td small { color: var(--ink-muted); }
 
 .stepper {
   display: flex;
@@ -287,9 +323,9 @@ td small { color: #666; }
 
 /* The quiet square button, shared by the number steppers and the rank arrows. */
 .step {
-  background: #fff;
-  color: #000;
-  border: 1px solid #ccc;
+  background: var(--card);
+  color: var(--ink);
+  border: 1px solid var(--border);
   border-radius: 6px;
   font-size: 1.1rem;
   line-height: 1;
@@ -298,7 +334,7 @@ td small { color: #666; }
 }
 
 .step:hover {
-  background: #f0f0f0;
+  background: var(--accent-soft);
 }
 
 .stepper .step {
@@ -315,7 +351,7 @@ td small { color: #666; }
   font-size: 0.8rem;
   text-transform: uppercase;
   letter-spacing: 0.08em;
-  color: #666;
+  color: var(--ink-muted);
 }
 
 .countdown {
@@ -330,7 +366,7 @@ td small { color: #666; }
 /* Outside the window there is nothing to count down to, so it reads as a clock time. */
 .countdown.paused,
 .countdown.idle {
-  color: #888;
+  color: var(--ink-faint);
 }
 
 /* A sentence standing where the digits normally do needs a size of its own — the clock
@@ -340,16 +376,12 @@ td small { color: #666; }
   font-weight: 600;
 }
 
-.countdown-card .hint {
-  margin: 0.6rem 0 0;
-}
-
 .countdown-progress {
   position: relative;
   width: 100%;
   height: 5px;
   margin: 0.6rem 0 0;
-  background: #e5e5e5;
+  background: var(--track);
   border-radius: 999px;
   overflow: hidden;
 }
@@ -361,7 +393,7 @@ td small { color: #666; }
   left: 50%;
   height: 100%;
   width: 100%;
-  background: #f5a623;
+  background: var(--accent);
   transform: translateX(-50%);
   transition: width 1s linear;
 }
@@ -369,8 +401,8 @@ td small { color: #666; }
 /* --- Booking settings, shown in the add form and per watch --------------------------- */
 
 .booking-prefs {
-  background: #fafbfc;
-  border: 1px solid #eee;
+  background: var(--bg);
+  border: 1px solid var(--divider);
   border-radius: 8px;
   padding: 0.9rem 1rem 1rem;
   margin-bottom: 0.75rem;
@@ -380,7 +412,7 @@ td small { color: #666; }
   margin: 0 0 0.4rem;
   font-size: 0.8rem;
   font-weight: 600;
-  color: #555;
+  color: var(--ink-muted);
 }
 
 .prefs-title + .rank,
@@ -401,14 +433,14 @@ td small { color: #666; }
   align-items: center;
   gap: 0.5rem;
   padding: 0.3rem 0;
-  border-bottom: 1px solid #f0f0f0;
+  border-bottom: 1px solid var(--divider);
 }
 
 .rank li::before {
   counter-increment: rank;
   content: counter(rank) ".";
   width: 1.2rem;
-  color: #888;
+  color: var(--ink-faint);
   font-size: 0.85rem;
 }
 
@@ -449,16 +481,16 @@ td small { color: #666; }
   align-items: center;
   gap: 0.4rem;
   padding: 0.35rem 0.6rem;
-  border: 1px solid #ddd;
+  border: 1px solid var(--border);
   border-radius: 999px;
-  background: #fff;
+  background: var(--card);
   font-size: 0.85rem;
   margin: 0;
 }
 
 .chip:has(input:checked) {
-  border-color: #f5a623;
-  background: #fff8ec;
+  border-color: var(--accent);
+  background: var(--accent-soft);
 }
 
 .inline-check.seat {
@@ -472,7 +504,7 @@ td small { color: #666; }
   padding: 0.35rem 0.6rem 0.6rem;
   border-top: none;
   font-size: 0.85rem;
-  color: #444;
+  color: var(--ink-muted);
 }
 
 .auto-summary-text {
@@ -496,7 +528,7 @@ td small { color: #666; }
 .toggle-track {
   position: absolute;
   inset: 0;
-  background: #c6cbd1;
+  background: var(--track);
   border-radius: 999px;
   cursor: pointer;
   transition: background 0.15s ease;
@@ -515,7 +547,11 @@ td small { color: #666; }
 }
 
 .toggle input:checked + .toggle-track {
-  background: #2e7d32;
+  background: var(--moss);
+}
+
+.toggle input:checked + .toggle-track:hover {
+  background: var(--moss-hover);
 }
 
 .toggle input:checked + .toggle-track::before {
@@ -523,6 +559,6 @@ td small { color: #666; }
 }
 
 .toggle input:focus-visible + .toggle-track {
-  outline: 2px solid #2e7d32;
+  outline: 2px solid var(--moss);
   outline-offset: 2px;
 }

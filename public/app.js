@@ -3,7 +3,6 @@ const form = document.querySelector("#add-form");
 const formError = document.querySelector("#form-error");
 const settingsForm = document.querySelector("#settings-form");
 const settingsError = document.querySelector("#settings-error");
-const settingsStatus = document.querySelector("#settings-status");
 const countdownEl = document.querySelector("#countdown");
 const countdownLabel = document.querySelector("#countdown-label");
 const countdownProgressFill = document.querySelector("#countdown-progress-fill");
@@ -469,9 +468,9 @@ function renderSettings(settings, { fillInputs }) {
   if (missing.length) {
     schedulerState = null;
     renderCountdown();
-    settingsStatus.textContent =
-      `Servern svarade utan ${missing.join(", ")}. Den kör troligen en äldre version än` +
-      " sidan — starta om den (npm start).";
+    console.warn(
+      `Servern svarade utan ${missing.join(", ")}. Den kör troligen en äldre version än sidan — starta om den (npm start).`
+    );
     return;
   }
 
@@ -481,20 +480,6 @@ function renderSettings(settings, { fillInputs }) {
     settingsForm.activeFrom.value = settings.activeFrom;
     settingsForm.activeTo.value = settings.activeTo;
   }
-  const { intervalMinutes: base, jitterMinutes: jitter, activeFrom, activeTo } = settings;
-  const span = jitter > 0 ? `${base}–${base + jitter}` : String(base);
-  const window =
-    activeFrom === activeTo ? "dygnet runt" : `mellan ${activeFrom} och ${activeTo}`;
-
-  const backoff =
-    settings.consecutiveFailures > 0
-      ? ` Väntetiden är uppdubblad efter ${settings.consecutiveFailures} misslyckad(e) cykel/cykler.`
-      : "";
-  settingsStatus.textContent = settings.idle
-    ? `Inget kollas just nu. Slå på en bevakning eller lägg till en ny, så körs kontrollerna` +
-      ` med ${span} minuters mellanrum ${window}.`
-    : `Kollar med ${span} minuters mellanrum ${window}.${backoff}`;
-
   schedulerState = settings;
   renderCountdown();
 }
@@ -505,7 +490,7 @@ async function loadSettings({ fillInputs }) {
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     renderSettings(await res.json(), { fillInputs });
   } catch (err) {
-    settingsStatus.textContent = `Kunde inte hämta intervallet: ${err.message}`;
+    console.error(`Kunde inte hämta intervallet: ${err.message}`);
   }
 }
 
