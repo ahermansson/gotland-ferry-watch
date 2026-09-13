@@ -1,12 +1,23 @@
 /**
- * The approval side of auto-booking. A webhook (notifier.ts) can only push text -- it
- * cannot listen for a click -- so a real Discord bot sits in the target channel instead,
- * posts the prepared checkout as a message with buttons, and waits.
+ * What happens once a watch with Auto on finds its departure: prepare the checkout, and
+ * then either ask or buy.
  *
- * Nothing here can spend the travel credit on its own. `requestBookingApproval` prepares
- * a checkout and then only ever asks; the browser session it opened stays parked until a
- * user in DISCORD_APPROVERS clicks "Godkänn köp" inside the approval window, at which
- * point -- and only at which point -- pressBetala (src/booking.ts) is called.
+ * ASK is the default and the original design. A webhook (notifier.ts) can only push text
+ * -- it cannot listen for a click -- so a real Discord bot sits in the target channel,
+ * posts the prepared checkout with buttons, and the browser session stays parked until a
+ * user in DISCORD_APPROVERS presses "Godkänn köp" inside the approval window.
+ *
+ * BUY is `AUTO_BOOKING_UNATTENDED=1`, and it is what makes a watch worth running at four
+ * in the morning: the same prepared checkout is paid immediately, and Discord is told
+ * afterwards rather than asked beforehand. The rule this revises used to read "nothing
+ * here can spend the travel credit on its own", and it is revised deliberately, because
+ * the alternative was a night-time auto-booking that prepares a purchase nobody is awake
+ * to approve and drops it ten minutes later.
+ *
+ * pressBetala (src/booking.ts) is still called from exactly two places, both in this file
+ * and both in this order: after an approved click, or after prepareBooking returned ok
+ * with unattended buying on. It is never reachable from the scraper, from a route, or
+ * from `npm run book`.
  */
 import {
   ActionRowBuilder,
@@ -17,9 +28,11 @@ import {
   GatewayIntentBits,
   type ButtonInteraction,
   type Message,
+  type SendableChannels,
 } from "discord.js";
 import { buildTripInvite } from "./calendar.js";
 import { recordCheckResult, setActive } from "./db.js";
+import { broadcast } from "./events.js";
 import { report } from "./notifier.js";
 import { pressBetala, prepareBooking, type PreparedBooking } from "./booking.js";
 import type { Watch } from "./types.js";
@@ -46,9 +59,25 @@ function approverIds(): Set<string> {
   );
 }
 
-/** The master switch: off means requestBookingApproval never prepares a checkout at all. */
+/** The master switch: off means auto-booking never prepares a checkout at all. */
 export function autoBookingEnabled(): boolean {
   return process.env.AUTO_BOOKING_ENABLED === "1";
+}
+
+/**
+ * Whether a prepared checkout is PAID without asking anyone first.
+ *
+ * This is the one setting in the project that spends money with nobody watching, so it is
+ * off unless it says exactly "1" -- no truthiness, no "true", no default. It narrows
+ * nothing on its own: AUTO_BOOKING_ENABLED must also be on, the watch's own Auto switch
+ * must be on, and the price cap still refuses a checkout that came out too expensive.
+ * Those three plus the cap are what stands between a scrape and a purchase.
+ *
+ * Off -- the default, and what the project shipped with -- the flow stops at the checkout
+ * and asks in Discord exactly as before.
+ */
+export function unattendedBuying(): boolean {
+  return process.env.AUTO_BOOKING_UNATTENDED === "1";
 }
 
 export async function startApprovalBot(): Promise<void> {
@@ -125,6 +154,9 @@ async function handleButton(interaction: ButtonInteraction): Promise<void> {
     if (result.ok) {
       recordCheckResult(watchId, "booked", result.detail);
       setActive(watchId, false);
+      // Not after a check: minutes later, when somebody pressed a button in Discord. Left
+      // out, the page keeps saying "Ledig plats!" about a trip that is already bought.
+      broadcast("watches");
       const { watch, arrival, returnArrival } = entry.prepared;
       const files: AttachmentBuilder[] = [];
       try {
@@ -178,12 +210,17 @@ export async function requestBookingApproval(watch: Watch): Promise<{ requested:
   if (!autoBookingEnabled()) return { requested: false, detail: "AUTO_BOOKING_ENABLED är av." };
   if (!watch.booking.autoBook) return { requested: false, detail: "Auto är avstängt för bevakningen." };
   if (inFlight.has(watch.id)) return { requested: true, detail: "Ett köp väntar redan på godkännande." };
-  if (!client) return { requested: false, detail: "Discord-boten är inte ansluten." };
+  if (!client && !unattendedBuying()) return { requested: false, detail: "Discord-boten är inte ansluten." };
 
   const channelId = process.env.DISCORD_CHANNEL_ID;
-  if (!channelId) return { requested: false, detail: "DISCORD_CHANNEL_ID saknas." };
-  if (approverIds().size === 0) {
-    return { requested: false, detail: "DISCORD_APPROVERS är tom -- ingen kan godkänna." };
+  // Only the ASK path needs somewhere to ask and somebody to answer. Refusing to BUY
+  // because the bot is down would be the setting failing exactly when it is needed: at
+  // night, unattended, which is the whole reason it was turned on.
+  if (!unattendedBuying()) {
+    if (!channelId) return { requested: false, detail: "DISCORD_CHANNEL_ID saknas." };
+    if (approverIds().size === 0) {
+      return { requested: false, detail: "DISCORD_APPROVERS är tom -- ingen kan godkänna." };
+    }
   }
 
   inFlight.add(watch.id);
@@ -209,11 +246,13 @@ export async function requestBookingApproval(watch: Watch): Promise<{ requested:
  */
 async function prepareAndAsk(
   watch: Watch,
-  client: Client,
-  channelId: string
+  client: Client | undefined,
+  channelId: string | undefined
 ): Promise<{ requested: boolean; detail: string }> {
-  const channel = await client.channels.fetch(channelId).catch(() => null);
-  if (!channel || !channel.isTextBased() || !("send" in channel)) {
+  // Fetched up front on the ASK path, so a misconfigured channel is found BEFORE a
+  // checkout is driven and then thrown away. Unattended buying needs no channel.
+  const channel = client && channelId ? await client.channels.fetch(channelId).catch(() => null) : null;
+  if (!unattendedBuying() && (!channel || !channel.isTextBased() || !("send" in channel))) {
     inFlight.delete(watch.id);
     return { requested: false, detail: "DISCORD_CHANNEL_ID pekar inte på en textkanal boten kan skriva i." };
   }
@@ -224,6 +263,8 @@ async function prepareAndAsk(
     return { requested: false, detail: prepared.detail };
   }
 
+  if (unattendedBuying()) return buyNow(watch, prepared, channel);
+
   const minutes = Number(process.env.BOOKING_APPROVAL_MINUTES ?? "10");
   const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder().setCustomId(`approve:${watch.id}`).setLabel("Godkänn köp").setStyle(ButtonStyle.Success),
@@ -232,7 +273,7 @@ async function prepareAndAsk(
 
   let message: Message;
   try {
-    message = await channel.send({
+    message = await (channel as SendableChannels).send({
       content:
         `🎫 **Redo att köpa** — ${watch.label}\n${prepared.detail}\n` +
         `Godkänn inom ${minutes} min, annars släpps sessionen och bevakningen fortsätter.`,
@@ -249,4 +290,71 @@ async function prepareAndAsk(
   pending.set(watch.id, { prepared, message, timer });
 
   return { requested: true, detail: prepared.detail };
+}
+
+/**
+ * Pays the prepared checkout, and tells Discord afterwards. Reached only with
+ * AUTO_BOOKING_UNATTENDED=1, from the one call site above, on a checkout prepareBooking
+ * already held against the watch's price cap.
+ *
+ * The message never pings. Somebody who turned this on did it so a 04:00 cancellation
+ * would be bought while they slept, and waking them to say it worked would undo the
+ * point; the purchase is there in the morning, with the screenshot. It is sent even when
+ * the bot is absent -- through the webhook, which needs no connection -- because a
+ * purchase nobody was told about is the one outcome worse than a purchase nobody
+ * approved.
+ */
+async function buyNow(
+  watch: Watch,
+  prepared: PreparedBooking,
+  channel: unknown
+): Promise<{ requested: boolean; detail: string }> {
+  try {
+    const result = await pressBetala(prepared);
+    const spent = prepared.total != null ? `${prepared.total} kr` : "okänt belopp";
+
+    if (result.ok) {
+      recordCheckResult(watch.id, "booked", result.detail);
+      setActive(watch.id, false);
+      broadcast("watches");
+    }
+
+    const headline = result.ok
+      ? `🎫 **Köpt automatiskt** — ${watch.label}\n${spent} med Reskort. ${result.detail}`
+      : `⚠️ **Betala klickades men flödet rapporterade ett problem** — ${watch.label}\n${result.detail}\n` +
+        `Kontrollera kontot manuellt.`;
+
+    // Through the bot when there is one, since the screenshot is the whole evidence of
+    // what was bought; otherwise the webhook, which is always there.
+    const sent = await postWithScreenshot(channel, headline, result.screenshotPath);
+    if (!sent) await report(result.ok ? "info" : "warn", headline, { repeatAfterMinutes: 0 });
+
+    return { requested: true, detail: result.detail };
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    // Betala may or may not have gone through. Say exactly that, and never quietly.
+    await report(
+      "error",
+      `❌ **Automatiskt köp kastade ett fel efter att Betala klickats** — ${watch.label}\n${detail}\n` +
+        `Kontrollera kontot manuellt innan du litar på bevakningen.`,
+      { repeatAfterMinutes: 0 }
+    );
+    return { requested: true, detail: `Köpet kastade: ${detail}` };
+  } finally {
+    inFlight.delete(watch.id);
+  }
+}
+
+/** Posts through the bot when one is connected and can write here. Returns whether it did. */
+async function postWithScreenshot(channel: unknown, content: string, screenshotPath?: string): Promise<boolean> {
+  if (!channel || typeof (channel as SendableChannels).send !== "function") return false;
+  try {
+    await (channel as SendableChannels).send({
+      content,
+      files: screenshotPath ? [new AttachmentBuilder(screenshotPath)] : [],
+    });
+    return true;
+  } catch {
+    return false;
+  }
 }

@@ -67,9 +67,13 @@ export const FARE_CLASSES = ["Mini", "Flexi", "Flexi +"] as const;
 export type FareClass = (typeof FARE_CLASSES)[number];
 
 /**
- * What an auto-booking is allowed to buy for one watch. The fare classes are a ranked
- * list — the highest ranked one that can be booked wins, so refundability can outrank
- * price — while the lounges are a plain allowlist and the cheapest permitted one is taken.
+ * What a watch is looking for, and -- when it auto-books -- what it may pay. The fare
+ * classes are a ranked list: for the notification any of them counts, and for a purchase
+ * the highest ranked one that can be booked wins, so refundability can outrank price. The
+ * lounges are a plain allowlist and the cheapest permitted one is taken.
+ *
+ * `fareOrder` and `salongs` define the HIT, so they are asked of every watch. `autoBook`,
+ * `maxPrice` and `seatReservation` are the buying half and only matter when it is armed.
  */
 export interface BookingPrefs {
   /** Off until switched on, per watch, on top of the global switch. */

@@ -20,6 +20,8 @@
       <p class="countdown-label" id="countdown-label">Nästa koll om</p>
       <p class="countdown" id="countdown">–</p>
       <div class="countdown-progress"><div class="countdown-progress-fill" id="countdown-progress-fill"></div></div>
+      <p class="hint" id="settings-status" hidden></p>
+      <p class="hint stream-trouble" id="stream-status" hidden>Tappade kontakten med servern — återansluter…</p>
     </section>
 
     <section class="card">
@@ -27,10 +29,10 @@
       <table id="watch-table">
         <thead>
           <tr>
-            <th>Aktiv</th>
+            <th><span class="visually-hidden">Visa mer</span></th>
             <th>Resa</th>
+            <th><span class="visually-hidden">Autobokning</span></th>
             <th>Status</th>
-            <th></th>
           </tr>
         </thead>
         <tbody></tbody>
@@ -77,13 +79,14 @@
             <input name="returnTime" placeholder="16:30" pattern="\d{2}:\d{2}" />
           </label>
         </div>
+        <div id="scope-block"></div>
         <label class="inline-check">
           <input type="checkbox" id="auto-book" />
           Autoboka när platsen dyker upp
         </label>
-        <p class="hint" id="auto-book-hint">Bestäms här och går inte att ändra efteråt. Ångrar du dig:
-          ta bort bevakningen och lägg till den igen. Autobokning stannar alltid vid kassan och
-          frågar i Discord innan något köps.</p>
+        <p class="hint" id="auto-book-hint">Allt ovan bestäms här och går inte att ändra efteråt.
+          Ångrar du dig: ta bort bevakningen och lägg till den igen. Autobokning stannar alltid vid
+          kassan och frågar i Discord innan något köps.</p>
         <div id="booking-block" hidden></div>
         <p class="hint">Avgångstiden måste matcha sajtens tabell exakt, t.ex. <code>07:15</code>.</p>
         <div class="dialog-actions">
@@ -126,6 +129,10 @@
         <p class="hint">En koll tar ~30–40 sekunder per bevakning. Påslaget gör att kollarna inte
           landar på samma klockslag varje timme. Misslyckas alla kollar i en cykel fördubblas
           väntetiden (max 8×) tills en lyckas.</p>
+        <p class="hint">Fönstret finns för att du inte ska väckas av en ledig plats mitt i natten.
+          En bevakning som <strong>köper helt på egen hand</strong> struntar därför i det och kollas
+          dygnet runt — den väcker ingen. Det kräver <code>AUTO_BOOKING_UNATTENDED=1</code> i
+          <code>.env</code>; är godkännande kvar frågar den dig, och då gäller fönstret.</p>
         <p class="hint">Tidsfönstret gäller svensk tid. Sluttid före starttid betyder ett fönster
           över midnatt, och samma tid i båda fälten stänger av fönstret helt — då kollas det
           dygnet runt. <strong>Kolla nu</strong> fungerar alltid, även utanför fönstret.</p>

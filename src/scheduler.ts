@@ -7,8 +7,9 @@ import {
   recordCheckResult,
   setActive,
 } from "./db.js";
+import { broadcast } from "./events.js";
 import { report, resetReportThrottle, sendDiscordNotification } from "./notifier.js";
-import { requestBookingApproval } from "./purchase.js";
+import { autoBookingEnabled, requestBookingApproval, unattendedBuying } from "./purchase.js";
 import { checkAvailability, isBookable } from "./scraper.js";
 import { VEHICLE_LABELS, type CheckResult, type TripLeg, type Watch } from "./types.js";
 
@@ -24,10 +25,15 @@ let scraping = false;
 function withCheckLock<T>(run: () => Promise<T>): Promise<T> {
   const result = checkLock.then(async () => {
     scraping = true;
+    // The card says "Kollar…" from this flag, so the page is told when it moves -- both
+    // ways. Without the second one a finished check leaves the spinner running until
+    // something else happens to broadcast.
+    broadcast("scheduler");
     try {
       return await run();
     } finally {
       scraping = false;
+      broadcast("scheduler");
     }
   });
   // Queue on a chain that always settles, so one failed check doesn't strand the rest.
@@ -42,6 +48,8 @@ export async function runSingleCheck(watchId: string): Promise<CheckResult | und
   // The notification stays outside the lock — a slow webhook shouldn't hold up a check.
   const result = await withCheckLock(() => checkAvailability(watch));
   recordCheckResult(watch.id, result.status, result.detail);
+  // The one change the pages cannot know about on their own.
+  broadcast("watches");
 
   if (result.status === "available" && watch.booking.autoBook) {
     const approval = await requestBookingApproval(watch);
@@ -75,6 +83,7 @@ export async function runSingleCheck(watchId: string): Promise<CheckResult | und
     if (delivered) {
       markNotified(watch.id);
       setActive(watch.id, false);
+      broadcast("watches");
       console.log(`  ${watch.label}: notified, watch deactivated.`);
     } else {
       // Nowhere to report this: the webhook is what failed. The console is the only
@@ -109,9 +118,9 @@ async function reportPartial(watch: Watch, result: CheckResult): Promise<void> {
     return;
   }
 
-  const freeLeg: TripLeg | null = result.offer && isBookable(result.offer)
+  const freeLeg: TripLeg | null = result.offer && isBookable(result.offer, watch.booking)
     ? "out"
-    : result.returnOffer && isBookable(result.returnOffer)
+    : result.returnOffer && isBookable(result.returnOffer, watch.booking)
       ? "return"
       : null;
   if (!freeLeg || freeLeg === watch.partialNotifiedLeg) return;
@@ -164,7 +173,28 @@ export function spacingMs(random: () => number = Math.random): number {
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-export async function runCycle(): Promise<CycleOutcome> {
+/**
+ * A watch that completes a purchase on its own, and is therefore exempt from the daily
+ * window.
+ *
+ * The window exists so nobody is woken at 04:00 by a seat they would have to book by
+ * hand. What earns the exemption is not being armed -- it is needing nobody. All three
+ * must hold: the watch's own Auto switch, AUTO_BOOKING_ENABLED, and
+ * AUTO_BOOKING_UNATTENDED. Miss the last one and the night check prepares a checkout that
+ * waits ten minutes for a click nobody is awake to give, drops it, and prepares it again
+ * on the next cycle -- all night, against the ferry's site, buying nothing. Being asked at
+ * 04:00 is precisely what the window was added to prevent, whoever is doing the asking.
+ */
+function runsAroundTheClock(watch: Watch): boolean {
+  return watch.booking.autoBook && autoBookingEnabled() && unattendedBuying();
+}
+
+/**
+ * `armedOnly` is a cycle outside the daily window: only the watches that buy on their own
+ * are checked. Departed watches are still retired -- that costs no request and a passed
+ * departure is passed at any hour.
+ */
+export async function runCycle({ armedOnly = false } = {}): Promise<CycleOutcome> {
   if (running) {
     console.log("Previous check cycle still running, skipping this tick.");
     return { checked: 0, deactivated: 0, failed: false };
@@ -178,9 +208,15 @@ export async function runCycle(): Promise<CycleOutcome> {
       setActive(watch.id, false);
       console.log(`  ${watch.label}: departure ${watch.date} ${watch.departureTime} has passed, deactivated.`);
     }
+    if (departed.length) broadcast("watches");
 
-    const watches = active.filter((w) => !hasDeparted(w));
-    console.log(`Checking ${watches.length} active watch(es)...`);
+    const live = active.filter((w) => !hasDeparted(w));
+    const watches = armedOnly ? live.filter(runsAroundTheClock) : live;
+    console.log(
+      armedOnly
+        ? `Outside the window — checking ${watches.length} auto-booking watch(es).`
+        : `Checking ${watches.length} active watch(es)...`
+    );
 
     let failures = 0;
     for (const [index, watch] of watches.entries()) {
@@ -289,6 +325,7 @@ function scheduleNext(): void {
     paused = false;
     nextCheckAt = null;
     timer = undefined;
+    broadcast("scheduler");
     console.log("No active watch — idle until one is added or switched back on.");
     return;
   }
@@ -299,14 +336,21 @@ function scheduleNext(): void {
   let delay: number;
   let note: string;
 
-  if (isWithinWindow(activeFrom, activeTo, now)) {
+  const armed = listWatches().some((w) => w.active && !hasDeparted(w) && runsAroundTheClock(w));
+
+  if (isWithinWindow(activeFrom, activeTo, now) || armed) {
     paused = false;
     delay = nextDelayMs(intervalMinutes, jitterMinutes, consecutiveFailures);
-    note = consecutiveFailures > 0 ? ` (backoff after ${consecutiveFailures} failed cycle(s))` : "";
+    note = isWithinWindow(activeFrom, activeTo, now)
+      ? consecutiveFailures > 0
+        ? ` (backoff after ${consecutiveFailures} failed cycle(s))`
+        : ""
+      : " (outside the window, auto-booking watches only)";
   } else {
-    // Outside the window there is nothing to decide until it opens, so sleep until then
-    // rather than waking every interval to conclude the same thing. The jitter still
-    // applies, so the first check of the day doesn't land on the stroke of the hour.
+    // Outside the window, with nothing that buys on its own, there is nothing to decide
+    // until it opens -- so sleep until then rather than waking every interval to conclude
+    // the same thing. The jitter still applies, so the first check of the day doesn't land
+    // on the stroke of the hour.
     paused = true;
     delay = msUntilWindowOpens(activeFrom, now) + Math.round(Math.random() * jitterMinutes * 60_000);
     note = ` (outside the ${activeFrom}–${activeTo} window)`;
@@ -314,6 +358,7 @@ function scheduleNext(): void {
 
   const at = new Date(now.getTime() + delay);
   nextCheckAt = at.toISOString();
+  broadcast("scheduler");
   console.log(`Next check at ${at.toLocaleString("sv-SE")}${note}.`);
   timer = setTimeout(tick, delay);
   timer.unref?.();
@@ -322,13 +367,11 @@ function scheduleNext(): void {
 async function tick(): Promise<void> {
   const { activeFrom, activeTo } = getSettings();
   // The window may have closed under us — the wait is long, and it is editable mid-wait.
-  if (!isWithinWindow(activeFrom, activeTo)) {
-    scheduleNext();
-    return;
-  }
+  // Outside it the cycle still runs, but only over the watches that buy on their own.
+  const armedOnly = !isWithinWindow(activeFrom, activeTo);
 
   try {
-    const outcome = await runCycle();
+    const outcome = await runCycle({ armedOnly });
     if (outcome.failed) {
       consecutiveFailures++;
       // Every check in the cycle failed. Once is a blip; repeatedly is the scraper being
@@ -401,6 +444,7 @@ export function getSchedulerState(): {
   checking: boolean;
   paused: boolean;
   idle: boolean;
+  aroundTheClock: boolean;
   consecutiveFailures: number;
 } {
   // While a cycle runs, `nextCheckAt` still holds the time it was started at, which would
@@ -412,6 +456,9 @@ export function getSchedulerState(): {
     paused,
     // No active watch at all, which is a different thing from waiting out the window.
     idle,
+    // Derived here rather than stored: a copy of what listWatches() answers would be stale
+    // the moment a watch was added, switched off or bought.
+    aroundTheClock: listWatches().some((w) => w.active && !hasDeparted(w) && runsAroundTheClock(w)),
     consecutiveFailures,
   };
 }

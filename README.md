@@ -45,16 +45,20 @@ cycle while the other leg opening still is.
 
 ## Auto-booking settings
 
-Each watch carries what an auto-booking would be allowed to buy: the fare classes in
-ranked order (the highest ranked one that can be booked wins), the lounges that will do
-(the cheapest permitted one is taken), a price cap for the whole trip, and whether to add
-the paid seat reservation.
+A watch says which fare classes and which lounges it is watching for, and those are what
+count as a hit: a watch for Försalong is not answered by a free Barnsalong, and the check
+reports "det finns lediga platser, men inte i biljettklass/salong du bevakar" rather than
+staying silent about why. The fare classes are ranked, best first.
+
+Auto-booking adds exactly two things on top: a price cap for the whole trip, and whether
+to buy the paid seat reservation. When it fires, the highest ranked bookable fare wins and
+the cheapest permitted lounge is taken.
 
 **All of it is decided when the watch is added, and none of it can be changed afterwards.**
-Tick **Autoboka** in the add form and the settings appear under it; the watch then carries
-a line in the table saying what it is allowed to buy, and that line is a fact, not a
-control. There is no switch on the row and `PATCH /api/watches/:id` refuses a `booking`
-body — an auto-booking that can be turned off from a table is one that can be turned off by
+Fare classes and lounges are part of the add form itself; ticking **Autoboka** reveals the
+price cap and the seat reservation. A watch that auto-books carries a 🤖 on its row, and
+the detail behind the row's arrow spells out what it may buy. There is no switch on the row
+and `PATCH /api/watches/:id` refuses a `booking` body — an auto-booking that can be turned off from a table is one that can be turned off by
 a mis-tap, and an auto-booking that is silently off is the failure this whole flow exists to
 prevent. Changed your mind: delete the watch and add it again.
 
@@ -68,11 +72,33 @@ a screenshot and a "Godkänn köp" / "Avbryt" button pair. The browser session i
 parked, until one of the ids in `DISCORD_APPROVERS` clicks — within `BOOKING_APPROVAL_MINUTES`,
 after which it's dropped unpressed and the watch keeps running.
 
-**Betala is only ever clicked in one place** (`pressBetala` in `src/booking.ts`), only
-reachable from the approval click in `src/purchase.ts`. `npm run book -- <watchId>` runs
-the same flow manually for testing and always closes the session unpressed — there is no
-flag that makes it press Betala. A price cap is required before a watch's Auto switch can
-be turned on at all: it is the one limit that still holds when everything else misreads.
+**Betala is only ever clicked in one place** (`pressBetala` in `src/booking.ts`), and it is
+reachable from exactly two call sites, both in `src/purchase.ts`: an approved click, and
+the unattended path below. `npm run book -- <watchId>` runs the same flow manually for
+testing and always closes the session unpressed — no setting makes the dry run press
+Betala. A price cap is required before a watch's Auto switch can be turned on at all: it is
+the one limit that still holds when everything else misreads.
+
+### Buying without being asked
+
+`AUTO_BOOKING_UNATTENDED=1` (default `0`) pays the prepared checkout immediately instead of
+asking, and tells Discord afterwards with the screenshot. It exists because the asking
+version cannot do the thing a ferry watch is for: at 04:00 a cancellation appears, the flow
+prepares a checkout, nobody is awake to press the button, and ten minutes later the session
+is dropped and re-prepared on the next cycle — all night, buying nothing.
+
+With it on, what stands between a check and a purchase is: `AUTO_BOOKING_ENABLED`, the
+watch's own Auto switch, the fare class and lounge that watch asked for, and the price cap.
+Set the cap to what you are willing to wake up to having paid.
+
+**This is also what exempts a watch from the daily window.** A watch that still needs a
+human at 04:00 is what the window exists to prevent, whoever is doing the asking — so the
+exemption follows this switch, not the Auto switch.
+
+The purchase message never pings: somebody who turned this on did it so the seat would be
+bought while they slept, and waking them to say it worked would undo the point. It is sent
+even when the bot is down, through the webhook, because a purchase nobody was told about is
+worse than a purchase nobody approved.
 
 ## What it reports, and where
 
@@ -94,6 +120,14 @@ console line too, so the terminal stays the complete record. Repeats are throttl
 condition (one message an hour per watch and reason, so a single broken watch can't bury
 the channel) and the throttle clears the moment the checks recover.
 
+## The watch table
+
+A row answers one question — which trip, and when — plus a 🤖 when the watch may buy it and
+a dot for how it stands. The arrow on the left opens everything else about it: passengers,
+vehicle, what counts as a hit, what it may pay, what the last check actually said, and the
+controls (pause, check now, delete). A paused watch says so on the row itself, since that
+is the one piece of state you would otherwise have to open a row to discover.
+
 ## Lounge priority
 
 Lounges are grouped into tiers, shown in notifications as:
@@ -105,9 +139,10 @@ Lounges are grouped into tiers, shown in notifications as:
 | Last resort | Barnsalong, Djursalong | ⚠️ |
 | Other | Kupé (Utsides/Insides/Djur/HCP/Allergi) and anything new | – |
 
-A watch counts as "available" when **any** fare class has **any** bookable lounge; the
-message tells you which, so you can judge whether it's worth taking. Adjust the mapping in
-`SALONG_TIERS` in `src/types.ts`.
+A watch counts as "available" when a fare class **it is watching** has a bookable lounge
+**it is watching**; the message tells you which, so you can judge whether it's worth taking.
+The tiers above only order and mark them — they do not decide the hit, the watch's own
+choices do. Adjust the mapping in `SALONG_TIERS` in `src/types.ts`.
 
 ## Setup
 
@@ -153,16 +188,46 @@ V1 supports one-way trips, adults (Vuxen 26+ år) only, and no vehicle / car und
 car over 2,25 m. Other passenger categories and vehicle types exist on the site but aren't
 exposed yet.
 
+## How the page stays current
+
+There is no polling. The server holds an open stream at `GET /api/events` and writes a
+line when something changes; the page listens with `EventSource` and fetches the endpoint
+that changed. What is sent is a nudge with no body — `/api/watches` and `/api/settings`
+stay the only definition of what a watch or the schedule looks like, so there is no second
+copy to drift.
+
+It is worth this little code because server-side state changes in only four moments: a
+cycle starting, a check finishing, the next cycle being scheduled, and a purchase being
+approved in Discord. That last one is the reason the rule is not simply "after a check" —
+it happens minutes later, when somebody presses a button, and without it the page would go
+on saying "Ledig plats!" about a trip that is already bought. Everything else a page shows,
+that page changed itself and already knows; the broadcast on add, delete and pause is
+there for the *other* tab, on the phone or the laptop.
+
+A dropped stream is not silent: the page says so under the countdown while it is down.
+`EventSource` reconnects on its own, and every reconnect resyncs — whatever changed while
+it was down was never sent, so re-fetching is the only way to be sure. `src/events.ts`
+sends a heartbeat comment every 25 seconds, because an idle connection and a dead one look
+identical to everything in between.
+
 ## Check interval
 
 The **Kontrollintervall** card at the bottom of the web UI sets how often the watches are
 checked: a base interval in minutes plus a random jitter added on top, so `5` + `3` means
 a check every 5–8 minutes. It also shows when the next check is due.
 
-A countdown at the top of the page shows how long until the next cycle starts — a cycle
+A countdown at the top of the page ticks locally — that is rendering, not traffic — and shows how long until the next cycle starts — a cycle
 checks every active watch in turn, so once more than one watch is active there is no
 single "next check" to count down to. Outside the window it shows the clock time the next
 cycle starts instead, since that wait is hours rather than minutes.
+
+**A watch that buys unattended ignores the window and is checked around the clock.** The
+window exists so a free seat at 04:00 doesn't wake somebody who would have to act on it;
+a watch that completes the purchase by itself needs nobody, and a cancellation is released
+as often at night as at noon. All three have to be on — the watch's Auto switch,
+`AUTO_BOOKING_ENABLED` and `AUTO_BOOKING_UNATTENDED` — because a watch that still asks is
+a watch that asks at 04:00. Outside the window, a cycle therefore runs over those watches
+only; with none, the scheduler sleeps until the window opens as before.
 
 The same card sets the daily window the checks run in (default 06:00–00:00, Swedish time —
 nobody releases ferry tickets at 03:00, and nobody books one then either). Outside the
@@ -217,7 +282,8 @@ minutes) — not for bulk scraping. Please:
 The scraper (used by the scheduled checks) never logs in, never proceeds past lounge
 selection, and never books anything. `npm run book` is a separate, manually-run tool that
 does log in and drive a real purchase up to the checkout page — it is never triggered by
-the scheduler.
+the scheduler, and never presses Betala. The purchase flow itself only runs for a watch
+with Auto on, and only when a departure it is watching for actually opens up.
 
 ## Project structure
 
