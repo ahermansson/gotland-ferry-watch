@@ -9,7 +9,7 @@ import {
 } from "./db.js";
 import { broadcast } from "./events.js";
 import { report, resetReportThrottle, sendDiscordNotification } from "./notifier.js";
-import { autoBookingEnabled, requestBookingApproval, unattendedBuying } from "./purchase.js";
+import { autoBookNow, autoBookingEnabled } from "./purchase.js";
 import { checkAvailability, isBookable } from "./scraper.js";
 import { VEHICLE_LABELS, type CheckResult, type TripLeg, type Watch } from "./types.js";
 
@@ -52,9 +52,9 @@ export async function runSingleCheck(watchId: string): Promise<CheckResult | und
   broadcast("watches");
 
   if (result.status === "available" && watch.booking.autoBook) {
-    const approval = await requestBookingApproval(watch);
-    if (approval.requested) {
-      console.log(`  ${watch.label}: booking approval requested (${approval.detail}).`);
+    const booking = await autoBookNow(watch);
+    if (booking.handled) {
+      console.log(`  ${watch.label}: auto-booking handled it (${booking.detail}).`);
       return result;
     }
     // Auto-booking wanted this but couldn't get there (bot down, Reskort not offered,
@@ -63,7 +63,7 @@ export async function runSingleCheck(watchId: string): Promise<CheckResult | und
     // which is the one outcome that looks identical to "nothing happened" from Discord.
     await report(
       "warn",
-      `**Autobokning kördes inte** — ${watch.label}\n${approval.detail}\nSkickar vanlig notis i stället.`,
+      `**Autobokning kördes inte** — ${watch.label}\n${booking.detail}\nSkickar vanlig notis i stället.`,
       { key: `autobook:${watch.id}` }
     );
   }
@@ -178,15 +178,12 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
  * window.
  *
  * The window exists so nobody is woken at 04:00 by a seat they would have to book by
- * hand. What earns the exemption is not being armed -- it is needing nobody. All three
- * must hold: the watch's own Auto switch, AUTO_BOOKING_ENABLED, and
- * AUTO_BOOKING_UNATTENDED. Miss the last one and the night check prepares a checkout that
- * waits ten minutes for a click nobody is awake to give, drops it, and prepares it again
- * on the next cycle -- all night, against the ferry's site, buying nothing. Being asked at
- * 04:00 is precisely what the window was added to prevent, whoever is doing the asking.
+ * hand. What earns the exemption is not being armed -- it is needing nobody, and since a
+ * watch that books does the whole thing without asking, being armed is now the same
+ * thing. Both must hold: the watch's own Auto switch and AUTO_BOOKING_ENABLED.
  */
 function runsAroundTheClock(watch: Watch): boolean {
-  return watch.booking.autoBook && autoBookingEnabled() && unattendedBuying();
+  return watch.booking.autoBook && autoBookingEnabled();
 }
 
 /**

@@ -11,8 +11,8 @@
  * second copy of both, and the two would drift the first time either changed.
  *
  * The events exist because server-side state changes in only a handful of moments: a
- * cycle starting, a check finishing, the next cycle being scheduled, and a purchase being
- * approved in Discord. Everything else a page shows, it changed itself and already knows.
+ * cycle starting, a check finishing, the next cycle being scheduled, and a purchase going
+ * through. Everything else a page shows, it changed itself and already knows.
  */
 import type { Response } from "express";
 

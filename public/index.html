@@ -85,8 +85,9 @@
           Autoboka när platsen dyker upp
         </label>
         <p class="hint" id="auto-book-hint">Allt ovan bestäms här och går inte att ändra efteråt.
-          Ångrar du dig: ta bort bevakningen och lägg till den igen. Autobokning stannar alltid vid
-          kassan och frågar i Discord innan något köps.</p>
+          Ångrar du dig: ta bort bevakningen och lägg till den igen. <strong>Autobokning frågar
+          inte</strong> — hittas platsen köps den, och Discord får besked efteråt. Det som
+          begränsar köpet är biljettklassen, salongerna och takpriset du sätter här.</p>
         <div id="booking-block" hidden></div>
         <p class="hint">Avgångstiden måste matcha sajtens tabell exakt, t.ex. <code>07:15</code>.</p>
         <div class="dialog-actions">
@@ -130,9 +131,9 @@
           landar på samma klockslag varje timme. Misslyckas alla kollar i en cykel fördubblas
           väntetiden (max 8×) tills en lyckas.</p>
         <p class="hint">Fönstret finns för att du inte ska väckas av en ledig plats mitt i natten.
-          En bevakning som <strong>köper helt på egen hand</strong> struntar därför i det och kollas
-          dygnet runt — den väcker ingen. Det kräver <code>AUTO_BOOKING_UNATTENDED=1</code> i
-          <code>.env</code>; är godkännande kvar frågar den dig, och då gäller fönstret.</p>
+          En bevakning med <strong>Autoboka</strong> struntar därför i det och kollas dygnet runt —
+          den köper själv och väcker ingen. Det kräver <code>AUTO_BOOKING_ENABLED=1</code> i
+          <code>.env</code>; utan den bokas ingenting alls och fönstret gäller alla bevakningar.</p>
         <p class="hint">Tidsfönstret gäller svensk tid. Sluttid före starttid betyder ett fönster
           över midnatt, och samma tid i båda fälten stänger av fönstret helt — då kollas det
           dygnet runt. <strong>Kolla nu</strong> fungerar alltid, även utanför fönstret.</p>

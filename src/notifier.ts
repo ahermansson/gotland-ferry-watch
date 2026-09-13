@@ -87,9 +87,9 @@ function reportWebhookUrl(): string | undefined {
 }
 
 /**
- * The other way a report can leave: the approval bot posting into the channel named by
+ * The other way a report can leave: the Discord bot posting into the channel named by
  * DISCORD_LOG_CHANNEL_ID. A channel addressed by id needs no webhook created for it, the
- * same way DISCORD_CHANNEL_ID already addresses the approval channel.
+ * same way DISCORD_CHANNEL_ID already addresses the channel receipts go to.
  *
  * Registered rather than imported. The bot lives in purchase.ts, which imports report()
  * from here, so reaching back for it would close a cycle -- the same reason events.ts
