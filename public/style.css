@@ -1,6 +1,9 @@
 :root {
   color-scheme: light;
   font-family: system-ui, sans-serif;
+  /* Checkboxes and radios, which otherwise render in the browser's own blue -- the one
+     cool saturated colour on an otherwise warm page. */
+  accent-color: var(--accent);
 
   /* A warm, muted palette -- linen and clay rather than white and saturated orange. */
   --bg: #f2ede3;
@@ -510,7 +513,7 @@ td small { color: var(--ink-muted); }
   height: 1.9rem;
   border: none;
   background: none;
-  color: #6b7a8c;
+  color: var(--ink-faint);
 }
 
 .icon-btn.chevron svg {
@@ -538,8 +541,8 @@ td small { color: var(--ink-muted); }
 
 .chip-paused {
   display: inline-block;
-  background: #eef2f7;
-  color: #5a6b7d;
+  background: var(--divider);
+  color: var(--ink-muted);
   border-radius: 999px;
   padding: 0.05rem 0.45rem;
   font-size: 0.7rem;
@@ -548,7 +551,7 @@ td small { color: var(--ink-muted); }
 
 /* Everything behind the arrow: the facts, then the controls. */
 .detail-row > td {
-  background: #f7f9fb;
+  background: var(--bg);
   padding: 0.75rem 1rem 0.9rem;
   border-top: none;
 }
@@ -562,7 +565,7 @@ td small { color: var(--ink-muted); }
 }
 
 .detail-grid dt {
-  color: #6b7a8c;
+  color: var(--ink-muted);
   white-space: nowrap;
 }
 
@@ -579,7 +582,7 @@ td small { color: var(--ink-muted); }
 
 .detail-active-label {
   font-size: 0.85rem;
-  color: #444;
+  color: var(--ink);
   margin-right: auto;
 }
 
@@ -657,5 +660,5 @@ td small { color: var(--ink-muted); }
 /* Said only while it is true: the stream is down and the page is showing what it last
    knew. EventSource is retrying on its own, so this is a notice, not an error. */
 .stream-trouble {
-  color: #b7791f;
+  color: var(--ochre);
 }
