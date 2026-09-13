@@ -157,17 +157,9 @@ async function handleButton(interaction: ButtonInteraction): Promise<void> {
       // Not after a check: minutes later, when somebody pressed a button in Discord. Left
       // out, the page keeps saying "Ledig plats!" about a trip that is already bought.
       broadcast("watches");
-      const { watch, arrival, returnArrival } = entry.prepared;
-      const files: AttachmentBuilder[] = [];
-      try {
-        files.push(new AttachmentBuilder(buildTripInvite(watch, arrival, returnArrival), { name: "resa.ics" }));
-      } catch (error) {
-        // A missing invite is a shame, not a reason to hide that the purchase went through.
-        console.error(`${watch.label}: could not build the calendar invite:`, error);
-      }
       await interaction.followUp({
         content: `✅ Köpt, godkänt av ${interaction.user.username}. ${result.detail}`,
-        files,
+        files: tripInviteAttachment(entry.prepared),
       });
     } else {
       await interaction.followUp(`⚠️ Betala klickades men flödet rapporterade ett problem: ${result.detail}`);
@@ -326,7 +318,14 @@ async function buyNow(
 
     // Through the bot when there is one, since the screenshot is the whole evidence of
     // what was bought; otherwise the webhook, which is always there.
-    const sent = await postWithScreenshot(channel, headline, result.screenshotPath);
+    const sent = await postWithScreenshot(
+      channel,
+      headline,
+      result.screenshotPath,
+      // Only on a purchase that went through -- a failed Betala has no trip to put in a
+      // calendar, and attaching one would say it does.
+      result.ok ? tripInviteAttachment(prepared) : []
+    );
     if (!sent) await report(result.ok ? "info" : "warn", headline, { repeatAfterMinutes: 0 });
 
     return { requested: true, detail: result.detail };
@@ -346,15 +345,39 @@ async function buyNow(
 }
 
 /** Posts through the bot when one is connected and can write here. Returns whether it did. */
-async function postWithScreenshot(channel: unknown, content: string, screenshotPath?: string): Promise<boolean> {
+async function postWithScreenshot(
+  channel: unknown,
+  content: string,
+  screenshotPath?: string,
+  extraFiles: AttachmentBuilder[] = []
+): Promise<boolean> {
   if (!channel || typeof (channel as SendableChannels).send !== "function") return false;
   try {
     await (channel as SendableChannels).send({
       content,
-      files: screenshotPath ? [new AttachmentBuilder(screenshotPath)] : [],
+      files: [...(screenshotPath ? [new AttachmentBuilder(screenshotPath)] : []), ...extraFiles],
     });
     return true;
   } catch {
     return false;
+  }
+}
+
+/**
+ * The .ics for a completed purchase, as a list so a failure is simply an empty one. Both
+ * ways of completing a purchase attach it: the approved click, and the unattended buy --
+ * which is the one that needs it most, since nobody was awake to read the times.
+ *
+ * A missing invite is a shame, not a reason to hide that the purchase went through, so
+ * this never throws. It cannot reach the webhook fallback in buyNow either, which carries
+ * no files at all -- the same limit the screenshot has always had there.
+ */
+function tripInviteAttachment(prepared: PreparedBooking): AttachmentBuilder[] {
+  const { watch, arrival, returnArrival } = prepared;
+  try {
+    return [new AttachmentBuilder(buildTripInvite(watch, arrival, returnArrival), { name: "resa.ics" })];
+  } catch (error) {
+    console.error(`${watch.label}: could not build the calendar invite:`, error);
+    return [];
   }
 }
