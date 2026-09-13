@@ -75,6 +75,10 @@ export interface PreparedBooking {
   watch: Watch;
   page: Page;
   total: number | null;
+  /** Arrival time of the outbound leg, as shown on the site -- for the calendar invite. */
+  arrival: string | null;
+  /** Arrival time of the return leg, null on a one-way watch. */
+  returnArrival: string | null;
   detail: string;
   screenshotPath: string;
   textDumpPath: string;
@@ -121,7 +125,7 @@ async function pickLeg(
   departureTime: string,
   leg: TripLeg,
   prefs: BookingPrefs
-): Promise<{ choice: BookingChoice } | { fail: string }> {
+): Promise<{ choice: BookingChoice; arrival: string | null } | { fail: string }> {
   const read = await readLeg(page, departureTime, leg);
   if ("missing" in read) return { fail: read.missing };
 
@@ -138,7 +142,7 @@ async function pickLeg(
   const picked = await selectSalong(page, buttons[0].key, choice.salong);
   if (!picked) return { fail: `Kunde inte klicka i salongen "${choice.salong}".` };
 
-  return { choice };
+  return { choice, arrival: read.offer.arrival };
 }
 
 /** "Boka nu" under Platsreservation, only when the watch asked for it -- never Båtbuss. */
@@ -282,6 +286,7 @@ export async function prepareBooking(watch: Watch): Promise<PreparedBooking | Fa
       return { ok: false, detail: out.fail, ...dumped };
     }
 
+    let returnArrival: string | null = null;
     if (roundTrip) {
       const back = await pickLeg(page, watch.returnTime!, "return", watch.booking);
       if ("fail" in back) {
@@ -289,6 +294,7 @@ export async function prepareBooking(watch: Watch): Promise<PreparedBooking | Fa
         await cancel();
         return { ok: false, detail: back.fail, ...dumped };
       }
+      returnArrival = back.arrival;
     }
 
     await page.getByRole("button", { name: "Fortsätt" }).click();
@@ -342,6 +348,8 @@ export async function prepareBooking(watch: Watch): Promise<PreparedBooking | Fa
       watch,
       page,
       total,
+      arrival: out.arrival,
+      returnArrival,
       detail: `Redo att betala${total != null ? ` ${total} kr` : ""} med Reskort.`,
       screenshotPath,
       textDumpPath,

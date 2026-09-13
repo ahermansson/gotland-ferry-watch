@@ -18,6 +18,7 @@ import {
   type ButtonInteraction,
   type Message,
 } from "discord.js";
+import { buildTripInvite } from "./calendar.js";
 import { recordCheckResult, setActive } from "./db.js";
 import { report } from "./notifier.js";
 import { pressBetala, prepareBooking, type PreparedBooking } from "./booking.js";
@@ -124,7 +125,18 @@ async function handleButton(interaction: ButtonInteraction): Promise<void> {
     if (result.ok) {
       recordCheckResult(watchId, "booked", result.detail);
       setActive(watchId, false);
-      await interaction.followUp(`✅ Köpt, godkänt av ${interaction.user.username}. ${result.detail}`);
+      const { watch, arrival, returnArrival } = entry.prepared;
+      const files: AttachmentBuilder[] = [];
+      try {
+        files.push(new AttachmentBuilder(buildTripInvite(watch, arrival, returnArrival), { name: "resa.ics" }));
+      } catch (error) {
+        // A missing invite is a shame, not a reason to hide that the purchase went through.
+        console.error(`${watch.label}: could not build the calendar invite:`, error);
+      }
+      await interaction.followUp({
+        content: `✅ Köpt, godkänt av ${interaction.user.username}. ${result.detail}`,
+        files,
+      });
     } else {
       await interaction.followUp(`⚠️ Betala klickades men flödet rapporterade ett problem: ${result.detail}`);
     }
